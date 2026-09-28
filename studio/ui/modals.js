@@ -398,4 +398,148 @@ async function openProjects() {
   };
 }
 $('projBtn').onclick = openProjects;
+
+// ================================================================== звук
+let sndTab = 'auto';
+const sndMoods = {};          // выбор настроения в этом окне: sid -> mood
+async function openSound() {
+  await X.flushDraft();
+  const body = X.openModal('Звук ролика', '', {
+    tools: `<div class="seg-tabs flat" id="sndTabs"><button data-t="auto" class="${sndTab === 'auto' ? 'on' : ''}">Автоматически</button><button data-t="ai" class="${sndTab === 'ai' ? 'on' : ''}">Через ИИ</button></div>`,
+  });
+  $('sndTabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; sndTab = b.dataset.t; openSound(); };
+  if (sndTab === 'auto') return soundAuto(body);
+  return soundAI(body);
+}
+$('sndBtn').onclick = openSound;
+
+async function soundAuto(body) {
+  body.innerHTML = '<p class="mnote">Читаю сцены…</p>';
+  const q = Object.keys(sndMoods).length ? '?moods=' + encodeURIComponent(JSON.stringify(sndMoods)) : '';
+  const r = await api.get('/api/sound/plan' + q);
+  const sc = r.scenes || [];
+  const only = new Set(sc.map(x => x.id));
+  let cur = sc[0] ? sc[0].id : null;
+  const srcLabel = { code: 'из кода (MOOD)', set: 'выбрано', auto: 'угадано' };
+  body.innerHTML = `<div class="mgrid" style="grid-template-columns:1.25fr 1fr">
+   <div class="mcol">
+    <p class="mnote" style="margin:0">Редактор сам расставит звук по таймингу каждой сцены: удары на HITS и склейках, акценты на появлении надписей,
+      подложки и ритм по длине сцены, нарастание перед сильной склейкой. Смысл сцены программа не понимает — поэтому
+      <b>настроение</b> выберите сами (или напишите в коде сцены <code>MOOD = 'tragic'</code>).</p>
+    ${r.music ? `<p class="mnote warn">В проекте есть своя музыка — звук сцен будет сдержанным: только удары и акценты, без подложек.</p>` : ''}
+    <div class="snd-list">${sc.map((x, i) => `<div class="snd-row ${x.id === cur ? 'on' : ''}" data-id="${x.id}">
+      <label class="chk" title="Генерировать для этой сцены"><input type="checkbox" data-only="${x.id}" checked></label>
+      <span class="snd-n">${i + 1}</span>
+      <span class="snd-name"><b>${esc(x.name)}</b><i>${x.dur.toFixed(1)} с · удары ${x.hits.length} · надписи ${x.accents.length}${x.has_sound ? ' · есть звук' : ''}</i></span>
+      <select class="select" data-mood="${x.id}" ${x.mood_src === 'code' ? 'disabled title="Задано в коде сцены: MOOD = …"' : ''}>${(r.moods || []).map(m => `<option value="${m.id}" ${m.id === x.mood ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select>
+      <span class="snd-src ${x.mood_src}">${srcLabel[x.mood_src]}</span></div>`).join('')}</div>
+   </div>
+   <div class="mcol">
+    <h4>Звук сцены <span id="sndName" class="muted" style="text-transform:none;letter-spacing:0"></span></h4>
+    <textarea class="mcode" id="sndCode" readonly style="min-height:260px"></textarea>
+    <p class="mnote" style="margin:0">Так будет выглядеть функция <code>sound()</code>. После генерации её можно поправить во вкладке «Код».</p>
+    <label class="chk"><input type="checkbox" id="sndLevels" checked> Фоновый гул и ветер — по настроению (AMBIENCE / WIND)</label>
+    ${r.generated === false ? '<label class="chk"><input type="checkbox" id="sndEnable" checked> Включить сгенерированный звук (сейчас выключен в настройках)</label>' : ''}
+    <div class="mrow"><button class="solid-accent" id="sndGo" style="padding:10px 18px;border-radius:9px">${icon('spark')}Сгенерировать звук</button>
+      <button class="ghost small" id="sndNone">Снять все</button><button class="ghost small" id="sndAll">Отметить все</button></div>
+    <p class="mnote">Заменится функция <code>sound()</code> в отмеченных сценах (картинка не меняется). Перед этим сохранится версия проекта.</p>
+    <div id="sndRes"></div>
+   </div></div>`;
+  const show = id => {
+    cur = id; const x = sc.find(y => y.id === id); if (!x) return;
+    body.querySelectorAll('.snd-row').forEach(rw => rw.classList.toggle('on', rw.dataset.id === id));
+    $('sndName').textContent = '— ' + x.name; $('sndCode').value = x.code;
+  };
+  if (cur) show(cur);
+  body.onclick = e => {
+    if (e.target.closest('select, input, label')) return;
+    const rw = e.target.closest('.snd-row'); if (rw) show(rw.dataset.id);
+    if (e.target.closest('#sndNone')) body.querySelectorAll('[data-only]').forEach(c => { c.checked = false; });
+    if (e.target.closest('#sndAll')) body.querySelectorAll('[data-only]').forEach(c => { c.checked = true; });
+  };
+  body.onchange = async e => {
+    const m = e.target.closest('[data-mood]');
+    if (m) {
+      sndMoods[m.dataset.mood] = m.value;
+      await api.post('/api/sound/mood', { id: m.dataset.mood, mood: m.value });
+      const rr = await api.get('/api/sound/plan?moods=' + encodeURIComponent(JSON.stringify(sndMoods)));
+      (rr.scenes || []).forEach(n => { const o = sc.find(y => y.id === n.id); if (o) Object.assign(o, n); });
+      const src = m.closest('.snd-row').querySelector('.snd-src'); src.textContent = srcLabel.set; src.className = 'snd-src set';
+      show(m.dataset.mood);
+    }
+  };
+  $('sndGo').onclick = async () => {
+    const onlyIds = [...body.querySelectorAll('[data-only]')].filter(c => c.checked).map(c => c.dataset.only);
+    if (!onlyIds.length) return toast('Отметьте хотя бы одну сцену');
+    const moods = {}; sc.forEach(x => { moods[x.id] = sndMoods[x.id] || x.mood; });
+    $('sndGo').disabled = true;
+    $('sndRes').innerHTML = '<p class="mnote"><i class="spinner" style="display:inline-block;vertical-align:-2px"></i> Пишу звук…</p>';
+    const res = await api.post('/api/sound/generate', { moods, only: onlyIds, levels: $('sndLevels').checked, enable: !!($('sndEnable') && $('sndEnable').checked) });
+    $('sndGo').disabled = false;
+    if (res.error) { $('sndRes').innerHTML = `<p class="mnote bad">${esc(res.error)}</p>`; return; }
+    X.closeModal(); await X.refresh();
+    toast(`<b>Звук готов</b>: изменено сцен — ${res.changed}. Звук пересводится, нажмите Пробел, чтобы послушать. Не понравилось — «Версии» → «Вернуть».`, 7000);
+  };
+}
+
+async function soundAI(body) {
+  body.innerHTML = `<div class="mgrid">
+   <div class="mcol">
+    <h4>1 · Задание для ИИ</h4>
+    <p class="mnote" style="margin:0">В задании весь ролик по порядку: код каждой сцены, её время в ролике, удары и надписи, тексты,
+      справочник звуков и правила общего стиля. ИИ вернёт новую <code>sound()</code> для каждой сцены.</p>
+    <div class="mrow"><button class="solid-accent" id="sbMake" style="padding:9px 16px;border-radius:8px">${icon('ai')}Составить задание</button></div>
+    <div id="sbBox" hidden>
+      <div class="mrow" style="justify-content:space-between;margin-bottom:6px"><span class="mnote">Скопируйте целиком и отправьте ИИ</span>
+        <span class="mrow"><button class="secondary small" id="sbCopy">${icon('copy')}Копировать</button><button class="ghost small" id="sbSave">${icon('export')}Скачать .md</button></span></div>
+      <textarea class="mcode" id="sbText" readonly style="min-height:300px"></textarea>
+    </div>
+   </div>
+   <div class="mcol">
+    <h4>2 · Ответ ИИ</h4>
+    <textarea class="mcode" id="saAns" placeholder="Вставьте сюда ответ ИИ целиком — блоки «# === scene: файл.py ===» найдутся сами"></textarea>
+    <div class="mrow"><button class="secondary" id="saCheck">${icon('check')}Проверить</button>
+      <label class="ghost small filebtn">${icon('upload')}Загрузить файл<input type="file" id="saFile" accept=".py,.txt,.md" hidden></label></div>
+    <div id="saRes"></div>
+   </div></div>`;
+  $('sbMake').onclick = async () => {
+    const r = await api.get('/api/sound/brief');
+    if (r.error) return toast('Ошибка: ' + esc(r.error));
+    $('sbText').value = r.text; $('sbBox').hidden = false;
+  };
+  $('sbCopy').onclick = async () => {
+    const ta = $('sbText');
+    try { await navigator.clipboard.writeText(ta.value); } catch (e) { ta.select(); document.execCommand('copy'); }
+    toast('Задание скопировано — вставьте его в чат с ИИ', 2500);
+  };
+  $('sbSave').onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([$('sbText').value], { type: 'text/markdown' }));
+    a.download = 'звук_задание_для_ИИ.md'; a.click();
+  };
+  $('saFile').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (f) $('saAns').value = await f.text(); };
+  $('saCheck').onclick = async () => {
+    const text = $('saAns').value;
+    if (!text.trim()) return toast('Вставьте ответ ИИ');
+    const r = await api.post('/api/sound/ai_check', { text });
+    const rows = r.rows || [];
+    const good = rows.filter(x => x.ok);
+    const st = X.ST;
+    const missing = st.scenes.filter(s => !rows.some(x => x.id === s.id));
+    $('saRes').innerHTML = !rows.length ? '<p class="mnote bad">Не нашёл ни одного блока «# === scene: файл.py ===». Попросите ИИ ответить строго в формате из задания.</p>' :
+      `<div class="snd-list">${rows.map(x => `<div class="snd-row"><span class="snd-n">${x.ok ? '<b style="color:var(--ok)">✓</b>' : '<b style="color:var(--bad)">✕</b>'}</span>
+        <span class="snd-name"><b>${esc(x.name)}</b><i>${x.ok ? `событий: ${x.events}` : esc(x.error)}</i></span></div>`).join('')}</div>
+      ${missing.length ? `<p class="mnote warn">Без звука от ИИ (останется как есть): ${missing.map(s => esc(s.name)).join(', ')}</p>` : ''}
+      ${good.length ? `${X.ST.audio.generated === false ? '<label class="chk"><input type="checkbox" id="saEnable" checked> Включить сгенерированный звук</label>' : ''}
+        <div class="mrow"><button class="solid-accent" id="saApply" style="padding:9px 16px;border-radius:8px">${icon('check')}Применить к ${good.length} сценам</button></div>
+        <p class="mnote">Заменится только sound() (и AMBIENCE / WIND, если ИИ их прислал). Перед этим сохранится версия.</p>` : ''}`;
+    const ap = $('saApply');
+    if (ap) ap.onclick = async () => {
+      const res = await api.post('/api/sound/ai_apply', { text, enable: !!($('saEnable') && $('saEnable').checked) });
+      if (res.error) return toast('Ошибка: ' + esc(res.error));
+      X.closeModal(); await X.refresh();
+      toast(`<b>Звук от ИИ применён</b> к ${res.rows.filter(x => x.ok).length} сценам. Нажмите Пробел, чтобы послушать.`, 6000);
+    };
+  };
+}
 })();

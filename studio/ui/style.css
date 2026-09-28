@@ -468,3 +468,20 @@ textarea.mfield { resize: vertical; min-height: 90px; line-height: 1.5; }
 .musictag { position: absolute; top: 10px; right: 10px; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--accent); color: #0b0c12; font-weight: 600; }
 .modal .mpicker .mp-bar { padding: 0 0 10px; }
 .modal .mpicker .asset-grid { padding: 2px 0 6px; max-height: 360px; overflow: auto; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+
+/* sound */
+.snd-list { display: flex; flex-direction: column; gap: 4px; max-height: 520px; overflow: auto; padding-right: 4px; }
+.snd-row { display: grid; grid-template-columns: 22px 22px minmax(0, 1fr) 170px 96px; gap: 8px; align-items: center; padding: 6px 8px;
+  border-radius: 8px; border: 1px solid transparent; cursor: pointer; }
+.snd-list .snd-row:only-child, .snd-row:not(:has(select)) { grid-template-columns: 22px minmax(0, 1fr); }
+.snd-row:hover { background: var(--surface-2); }
+.snd-row.on { background: var(--accent-soft); border-color: var(--accent-line); }
+.snd-n { font: 11px var(--mono); color: var(--faint); text-align: right; }
+.snd-name b { display: block; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.snd-name i { font-style: normal; font-size: 11px; color: var(--muted); }
+.snd-row .select { padding: 4px 6px; font-size: 12px; }
+.snd-src { font-size: 10.5px; color: var(--faint); }
+.snd-src.set { color: var(--accent); }
+.snd-src.code { color: var(--ok); }
+.mrow > label.filebtn, .mrow > label.chk { flex-direction: row; flex: none; min-width: 0; color: inherit; font-size: inherit; }
+.mrow > label.ghost.filebtn { color: var(--muted); font-size: 12px; }

@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import cv2
 import numpy as np
 
-from . import ai, automontage, engine, fx, library, media, projects, versions
+from . import ai, automontage, engine, fx, library, media, projects, soundgen, versions
 from .engine import Studio
 
 UI = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ui')
@@ -337,6 +337,13 @@ class H(BaseHTTPRequestHandler):
             if p == '/api/projects/cover':
                 d = projects.resolve(q.get('id', ''), S.dir)
                 return self.file(os.path.join(d, '.cache', 'cover.jpg'), 'image/jpeg')
+            if p == '/api/sound/plan':
+                moods = json.loads(q['moods']) if q.get('moods') else None
+                return self.js(dict(scenes=soundgen.plan(S, moods), moods=[dict(id=k, label=soundgen.MOODS[k]['label'])
+                                                                          for k in soundgen.ORDER],
+                                    music=S.p['audio'].get('music_file'), generated=S.p['audio'].get('generated', True)))
+            if p == '/api/sound/brief':
+                return self.js(dict(text=soundgen.brief(S)))
             if p == '/api/versions':
                 return self.js(dict(items=versions.list_versions(S)))
             if p == '/api/automontage/info':
@@ -464,6 +471,26 @@ class H(BaseHTTPRequestHandler):
                 d = projects.duplicate(S.dir, self.jbody().get('title'))
                 switch_project(d)
                 return self.js(dict(ok=True, id=projects._pid(d)))
+            # ---- звук
+            if p == '/api/sound/generate':
+                b = self.jbody()
+                n = soundgen.apply_generated(S, b.get('moods'), b.get('only') or None, b.get('levels', True))
+                if b.get('enable'):
+                    S.set_audio(dict(generated=True))
+                return self.js(dict(ok=True, changed=n))
+            if p == '/api/sound/mood':
+                b = self.jbody()
+                soundgen.set_mood(S, b['id'], b.get('mood'))
+                return self.js(dict(ok=True))
+            if p == '/api/sound/ai_check':
+                rows = soundgen.parse_answer(S, self.jbody().get('text', ''))
+                return self.js(dict(rows=[{k: v for k, v in r.items() if k != 'code'} for r in rows]))
+            if p == '/api/sound/ai_apply':
+                b = self.jbody()
+                rows = soundgen.apply_answer(S, b.get('text', ''))
+                if b.get('enable'):
+                    S.set_audio(dict(generated=True))
+                return self.js(dict(ok=True, rows=[{k: v for k, v in r.items() if k != 'code'} for r in rows]))
             # ---- версии
             if p == '/api/versions/create':
                 return self.js(dict(ok=True, version=versions.create(S, self.jbody().get('name', ''))))

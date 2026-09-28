@@ -793,7 +793,7 @@ class Studio:
                                    hits=m.get('hits', []), doc=m.get('doc', ''), gen=self.gen.get(s['id'], 0),
                                    error=self.errors.get(s['id']), used=sorted(self.used.get(s['id'], [])),
                                    layers=self._layers_view(s), fx=copy.deepcopy(s.get('fx', [])),
-                                   assets=sorted(self.assets_used.get(s['id'], []))))
+                                   assets=sorted(self.assets_used.get(s['id'], [])), mood=s.get('mood')))
             return dict(title=self.p.get('title', 'Project'), fps=fps, total=total, scenes=scenes,
                         texts=dict(self.p['texts']), look=dict(self.p['look']), audio=dict(self.p['audio']),
                         fonts=self.font_roles(), format=self.p.get('format', '16:9'), size=list(self.size),
