@@ -10,12 +10,62 @@ VIDEO_EXT = ('.mp4', '.mov', '.webm', '.mkv', '.m4v', '.avi')
 MAX_W = 1920          # кадры больше Full HD сразу уменьшаются — рендер всё равно 1920x1080
 
 
+def _short_path(path):
+    """Windows: короткое имя файла (8.3) — только латиница, если такие имена включены на диске."""
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(1024)
+        n = ctypes.windll.kernel32.GetShortPathNameW(path, buf, 1024)
+        return buf.value if 0 < n < 1024 else None
+    except Exception:
+        return None
+
+
+def _ascii_alias(path):
+    """Windows: ссылка/копия видео в папке с латинским путём (C:\\Users\\Public\\ShelterStudio)."""
+    import hashlib
+    import shutil
+    key = hashlib.sha1(('%s|%s' % (path, os.path.getmtime(path))).encode('utf-8')).hexdigest()[:16]
+    ext = os.path.splitext(path)[1].lower()
+    for base in (os.environ.get('PUBLIC', ''), os.path.splitdrive(path)[0] + os.sep):
+        if not base or not base.isascii():
+            continue
+        d = os.path.join(base, 'ShelterStudio', 'video_cache')
+        dst = os.path.join(d, key + ext)
+        try:
+            os.makedirs(d, exist_ok=True)
+            if not os.path.isfile(dst):
+                try:
+                    os.link(path, dst)          # тот же диск — мгновенно и без лишнего места
+                except OSError:
+                    shutil.copy2(path, dst)
+            return dst
+        except OSError:
+            continue
+    return None
+
+
+def open_capture(path):
+    """cv2.VideoCapture с запасными путями для Windows, если в пути есть русские буквы."""
+    cap = cv2.VideoCapture(path)
+    if cap.isOpened() or os.name != 'nt' or path.isascii():
+        return cap
+    for alt in (_short_path(path), None):
+        if alt is None:
+            alt = _ascii_alias(path)
+        if alt and alt.isascii():
+            c2 = cv2.VideoCapture(alt)
+            if c2.isOpened():
+                return c2
+    return cap
+
+
 class _Reader:
     """Последовательное чтение с дешёвыми шагами вперёд и перемоткой назад."""
 
     def __init__(self, path):
         self.path = path
-        self.cap = cv2.VideoCapture(path)
+        self.cap = open_capture(path)
         if not self.cap.isOpened():
             raise IOError("Не удалось открыть видео '%s'" % os.path.basename(path))
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -94,7 +144,7 @@ def info(path):
     """dict(w, h, fps, frames, dur) — кэшируется по времени изменения файла."""
     key = (path, os.path.getmtime(path))
     if key not in _INFO:
-        cap = cv2.VideoCapture(path)
+        cap = open_capture(path)
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         if not (1 <= fps <= 240):
             fps = 30.0
@@ -108,7 +158,7 @@ def info(path):
 
 def thumbnail(path, t=1.0):
     """Кадр для превью в списке (BGR)."""
-    cap = cv2.VideoCapture(path)
+    cap = open_capture(path)
     n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     if n:
