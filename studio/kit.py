@@ -10,6 +10,7 @@
 import math
 import os
 import re
+from collections import OrderedDict
 
 import cv2
 import numpy as np
@@ -22,8 +23,10 @@ __all__ = [
     'math', 'np', 'cv2', 'clamp', 'prog', 'lerp', 'oc', 'ic', 'ioc', 'oexp', 'iexp', 'oback', 'obounce',
     # тексты
     'tx', 'text', 'serif', 'bold', 'text_size',
-    # картинки
-    'image', 'sprite', 'portrait', 'kb', 'place', 'blit',
+    # картинки и видео
+    'image', 'sprite', 'portrait', 'kb', 'place', 'blit', 'video', 'video_info', 'cover', 'contain', 'safe_area',
+    # готовые эффекты (см. вкладку «Эффекты»)
+    'effect',
     # эффекты кадра
     'fill', 'darkbg', 'dim', 'blur', 'grayscale', 'shade_bottom', 'glow_circle', 'glow_ellipse',
     'dust', 'embers', 'card', 'diamond',
@@ -43,6 +46,43 @@ PROJECT = '.'
 TEXTS = {}
 USED = set()
 NEW_DEFAULTS = {}
+ASSETS_USED = set()
+ASSET_DIRS = []           # где искать картинки/видео (по умолчанию PROJECT/assets)
+FONT_DIRS = []            # где искать шрифты (по умолчанию PROJECT/fonts)
+FONT_ROLES = {}           # роль -> файл шрифта: {'title': 'oswald', 'serif': 'corm_i', 'text': 'oswald'}
+DEFAULT_ROLES = {'title': 'oswald', 'serif': 'corm_i', 'text': 'oswald'}
+LETTERBOX = True          # включены ли кинополосы (из Настроек) — от этого зависит «видимая область»
+
+
+def safe_area():
+    """(y0, высота) области кадра, которую видно: между кинополосами или весь кадр, если полос нет."""
+    return (VY, VH) if LETTERBOX else (0, H)
+
+
+class _LRU(OrderedDict):
+    """Кэш с ограничением по объёму (байты numpy-массивов) или по числу элементов."""
+
+    def __init__(self, max_bytes=None, max_items=None):
+        super().__init__()
+        self.max_bytes, self.max_items, self.bytes = max_bytes, max_items, 0
+
+    def get(self, k, d=None):
+        if k in self:
+            self.move_to_end(k)
+            return self[k]
+        return d
+
+    def put(self, k, v):
+        if k in self:
+            self.bytes -= getattr(self[k], 'nbytes', 0)
+        self[k] = v
+        self.move_to_end(k)
+        self.bytes += getattr(v, 'nbytes', 0)
+        while len(self) > 1 and ((self.max_bytes and self.bytes > self.max_bytes) or
+                                 (self.max_items and len(self) > self.max_items)):
+            _, old = self.popitem(last=False)
+            self.bytes -= getattr(old, 'nbytes', 0)
+        return v
 
 
 # ================================================================ math
@@ -107,27 +147,43 @@ def tx(key, default=''):
     return re.sub(r'\{(\w+)(?:\|(title|upper|lower))?\}', sub, str(s))
 
 
-_FONTS = {}
+_FONTS = _LRU(max_items=160)
+
+
+def font_role(fam):
+    """'title' / 'serif' / 'text' -> файл шрифта, выбранный в Настройках; иначе — само имя файла."""
+    if fam in FONT_ROLES:
+        return FONT_ROLES[fam]
+    return DEFAULT_ROLES.get(fam, fam)
+
+
+def _font_path(fam):
+    for d in (FONT_DIRS or [os.path.join(PROJECT, 'fonts')]):
+        for ext in ('.ttf', '.otf', '.TTF', '.OTF', ''):
+            p = os.path.join(d, fam + ext)
+            if os.path.isfile(p):
+                return p
+    return None
 
 
 def _font(fam, weight, size):
-    k = (fam, weight, size)
-    if k not in _FONTS:
-        path = None
-        for ext in ('.ttf', '.otf', ''):
-            p = os.path.join(PROJECT, 'fonts', fam + ext)
-            if os.path.isfile(p):
-                path = p
-                break
+    fam = font_role(fam)
+    k = (fam, weight, int(size))
+    f = _FONTS.get(k)
+    if f is None:
+        path = _font_path(fam)
         if path is None:
             raise FileNotFoundError("Шрифт '%s' не найден в папке fonts/" % fam)
         f = ImageFont.truetype(path, int(size))
         try:
-            f.set_variation_by_axes([weight])
+            ax = f.get_variation_axes()
+            if ax:
+                lo, hi = ax[0].get('minimum', weight), ax[0].get('maximum', weight)
+                f.set_variation_by_axes([max(lo, min(hi, weight))])
         except Exception:
             pass
-        _FONTS[k] = f
-    return _FONTS[k]
+        _FONTS.put(k, f)
+    return f
 
 
 _TL = {}
@@ -161,7 +217,7 @@ def _tlayer(s, fam, w, size, color, track, shadow):
     return a
 
 
-def text_size(s, fam='oswald', w=400, size=60, track=0.0):
+def text_size(s, fam='text', w=400, size=60, track=0.0):
     """Ширина и высота строки в пикселях."""
     f = _font(fam, w, size)
     tw = sum(f.getlength(c) for c in s) + track * size * max(0, len(s) - 1)
@@ -187,9 +243,10 @@ def blit(fr, a, x, y, op=1.0):
 
 
 def text(fr, t, t0, t1, s, cx, cy, align='c', rise=18, blur=True, fin=0.6, fout=0.5,
-         fam='oswald', w=400, size=60, color=CREAM, track=0.0, shadow=True):
+         fam='text', w=400, size=60, color=CREAM, track=0.0, shadow=True):
     """Текст, который появляется в момент t0 и исчезает к моменту t1.
     align: 'c' — по центру от cx, 'l' — от левого края cx, 'r' — до правого края cx.
+    fam: 'title' / 'serif' / 'text' — шрифты из Настроек, или имя файла из папки fonts/.
     Возвращает (x, y, ширина, высота) надписи или None, если она не видна."""
     if t < t0 or t > t1 or not s:
         return None
@@ -213,67 +270,174 @@ def text(fr, t, t0, t1, s, cx, cy, align='c', rise=18, blur=True, fin=0.6, fout=
 def serif(fr, t, t0, t1, s, cy=VY + VH - 120, size=68, cx=W / 2, **k):
     """Курсивная кинематографичная строка (по умолчанию — внизу кадра, как субтитр)."""
     k.setdefault('color', CREAM)
-    return text(fr, t, t0, t1, s, cx, cy, fam='corm_i', w=500, size=size, track=0.01, **k)
+    k.setdefault('fam', 'serif')
+    return text(fr, t, t0, t1, s, cx, cy, w=500, size=size, track=0.01, **k)
 
 
 def bold(fr, t, t0, t1, s, cy=H / 2, size=150, cx=W / 2, color=CREAM, track=0.08, **k):
     """Крупный жирный заголовок."""
-    return text(fr, t, t0, t1, s, cx, cy, fam='oswald', w=700, size=size, color=color, track=track, **k)
+    k.setdefault('fam', 'title')
+    return text(fr, t, t0, t1, s, cx, cy, w=700, size=size, color=color, track=track, **k)
 
 
 # ================================================================ images
-_IMG = {}
+_IMG = _LRU(max_bytes=700 << 20)
+IMG_EXTS = ('', '.png', '.jpg', '.jpeg', '.webp')
+VID_EXTS = ('.mp4', '.mov', '.webm', '.mkv', '.m4v', '.avi')
 
 
-def _path(name):
-    for ext in ('', '.png', '.jpg', '.jpeg', '.webp'):
-        p = os.path.join(PROJECT, 'assets', name + ext)
-        if os.path.isfile(p):
-            return p
-    raise FileNotFoundError("Картинка '%s' не найдена в папке assets/" % name)
+def _path(name, exts=IMG_EXTS, what='Картинка'):
+    for d in (ASSET_DIRS or [os.path.join(PROJECT, 'assets')]):
+        for ext in exts:
+            p = os.path.join(d, name + ext)
+            if os.path.isfile(p):
+                ASSETS_USED.add(name)
+                return p
+    raise FileNotFoundError("%s '%s' не найдена в папке assets/" % (what, name))
+
+
+def _mt(p):
+    return os.path.getmtime(p)
+
+
+def _lut(fn):
+    x = np.arange(256, dtype=np.float32)
+    return np.clip(fn(x), 0, 255).astype(np.uint8)
+
+
+def _saturate(a, sat):
+    """Насыщенность: 0 — ч/б, 1 — без изменений, >1 — сочнее (быстро, без float-кадра)."""
+    if abs(sat - 1) < 1e-3:
+        return a
+    g = cv2.cvtColor(cv2.cvtColor(a, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
+    return cv2.addWeighted(a, sat, g, 1 - sat, 0)
 
 
 def _grade(a, sat, con, bright, tint):
-    f = a.astype(np.float32) / 255
-    g = f.mean(2, keepdims=True)
-    f = g + (f - g) * sat
-    f = (f - 0.5) * con + 0.5
-    f = f * bright * np.array(tint, np.float32)
-    return (np.clip(f, 0, 1) * 255).astype(np.uint8)
+    a = _saturate(a[..., :3], sat)
+    tint = tuple(tint)
+    if (con, bright, tint) == (1.0, 1.0, (1, 1, 1)):
+        return a if a.flags['C_CONTIGUOUS'] else np.ascontiguousarray(a)
+    ch = cv2.split(a)
+    out = [cv2.LUT(c, _lut(lambda x, m=m: ((x / 255 - 0.5) * con + 0.5) * bright * m * 255)) for c, m in zip(ch, tint)]
+    return cv2.merge(out)
 
 
 def image(name, sat=1.0, con=1.0, bright=1.0, tint=(1, 1, 1), blur=0):
     """Картинка из assets/ (RGB) с цветокоррекцией:
     sat — насыщенность, con — контраст, bright — яркость, tint — множители (R, G, B)."""
-    key = ('img', name, sat, con, bright, tuple(tint), blur)
-    if key not in _IMG:
-        a = np.array(Image.open(_path(name)).convert('RGB'))
+    p = _path(name)
+    key = ('img', p, _mt(p), sat, con, bright, tuple(tint), blur)
+    a = _IMG.get(key)
+    if a is None:
+        a = np.array(Image.open(p).convert('RGB'))
         if (sat, con, bright, tuple(tint)) != (1.0, 1.0, 1.0, (1, 1, 1)):
             a = _grade(a, sat, con, bright, tint)
         if blur:
             a = cv2.GaussianBlur(a, (0, 0), blur)
-        _IMG[key] = a
-    return _IMG[key]
+        _IMG.put(key, a)
+    return a
 
 
 def sprite(name):
     """Картинка с прозрачностью (RGBA) из assets/ — для place()."""
-    key = ('spr', name)
-    if key not in _IMG:
-        _IMG[key] = np.array(Image.open(_path(name)).convert('RGBA'))
-    return _IMG[key]
+    p = _path(name)
+    key = ('spr', p, _mt(p))
+    a = _IMG.get(key)
+    if a is None:
+        a = _IMG.put(key, np.array(Image.open(p).convert('RGBA')))
+    return a
 
 
 def portrait(name, w, h, sharpen=0.6):
     """Маленькую картинку увеличить до w x h с повышением резкости."""
-    key = ('por', name, w, h, sharpen)
-    if key not in _IMG:
+    p = _path(name)
+    key = ('por', p, _mt(p), int(w), int(h), sharpen)
+    f = _IMG.get(key)
+    if f is None:
         f = cv2.resize(image(name), (int(w), int(h)), interpolation=cv2.INTER_CUBIC)
         if sharpen:
             bl = cv2.GaussianBlur(f, (0, 0), 2)
             f = cv2.addWeighted(f, 1 + sharpen, bl, -sharpen, 0)
-        _IMG[key] = f
-    return _IMG[key]
+        _IMG.put(key, f)
+    return f
+
+
+def video(name, t, start=0.0, speed=1.0, loop=True, sat=1.0, con=1.0, bright=1.0, tint=(1, 1, 1), blur=0):
+    """Кадр видео из assets/ (RGB) для момента сцены t.
+    start — с какой секунды файла начать (подрезка), speed — скорость, loop — зациклить.
+    Дальше кадр используется как картинка: cover(fr, video('beach', t)) или kb(fr, video(...), ...)."""
+    from . import media
+    p = _path(name, VID_EXTS, 'Видео')
+    a = media.frame_at(p, start + max(0.0, t) * speed, loop)
+    if (sat, con, bright, tuple(tint)) != (1.0, 1.0, 1.0, (1, 1, 1)):
+        a = _grade(a, sat, con, bright, tint)
+    if blur:
+        a = cv2.GaussianBlur(a, (0, 0), blur)
+    return a
+
+
+def video_info(name):
+    """Длина и размер видео: dict(w, h, fps, frames, dur)."""
+    from . import media
+    return media.info(_path(name, VID_EXTS, 'Видео'))
+
+
+def _area(area):
+    if area == 'full':
+        return (0, 0, W, H)
+    y0, h = safe_area()
+    return (0, y0, W, h)
+
+
+def cover(fr, img, zoom=1.0, fx=0.5, fy=0.5, area='visible', dx=0.0, dy=0.0, op=1.0):
+    """Заполнить кадр картинкой/кадром видео целиком (лишнее обрезается).
+    zoom > 1 — крупнее, fx/fy (0..1) — какую часть картинки держать в центре,
+    area='visible' — только между кинополосами, 'full' — весь кадр; dx, dy — сдвиг в пикселях."""
+    x0, y0, aw, ah = _area(area)
+    h, w = img.shape[:2]
+    s = max(aw / w, ah / h) * zoom
+    cx = w * fx
+    cy = h * fy
+    # не показывать края: держать центр так, чтобы картинка покрывала область
+    hw, hh = aw / 2 / s, ah / 2 / s
+    cx = min(max(cx, hw), w - hw) if w > 2 * hw else w / 2
+    cy = min(max(cy, hh), h - hh) if h > 2 * hh else h / 2
+    M = np.float32([[s, 0, x0 + aw / 2 - cx * s + dx], [0, s, y0 + ah / 2 - cy * s + dy]])
+    _warp_into(fr, img, M, (x0, y0, aw, ah), op)
+
+
+def contain(fr, img, zoom=1.0, area='visible', dx=0.0, dy=0.0, op=1.0):
+    """Вписать картинку целиком (с полями), по центру области."""
+    x0, y0, aw, ah = _area(area)
+    h, w = img.shape[:2]
+    s = min(aw / w, ah / h) * zoom
+    M = np.float32([[s, 0, x0 + aw / 2 - w / 2 * s + dx], [0, s, y0 + ah / 2 - h / 2 * s + dy]])
+    _warp_into(fr, img, M, (x0, y0, aw, ah), op)
+
+
+def _warp_into(fr, img, M, rect, op=1.0):
+    x0, y0, aw, ah = [int(round(v)) for v in rect]
+    M = M.copy()
+    M[0, 2] -= x0
+    M[1, 2] -= y0
+    if img.shape[2] == 3 and op >= 0.999:
+        sub = cv2.warpAffine(img, M, (aw, ah), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        # края, куда картинка не попала, оставить как были
+        mask = cv2.warpAffine(np.full(img.shape[:2], 255, np.uint8), M, (aw, ah), flags=cv2.INTER_NEAREST)
+        reg = fr[y0:y0 + ah, x0:x0 + aw]
+        np.copyto(reg, sub, where=mask[..., None] > 0)
+        return
+    src = img if img.shape[2] == 4 else np.dstack([img, np.full(img.shape[:2], 255, np.uint8)])
+    sub = cv2.warpAffine(src, M, (aw, ah), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+    blit(fr[y0:y0 + ah, x0:x0 + aw], sub, 0, 0, op)
+
+
+def effect(fr, t, dur, name, /, **params):
+    """Готовый эффект из вкладки «Эффекты» прямо из кода: effect(fr, t, dur, 'glitch', amount=0.6).
+    t0/t1 — когда эффект активен (по умолчанию — вся сцена)."""
+    from . import fx
+    fx.apply(fr, t, dur, dict(params, name=name))
 
 
 def kb(fr, src, cx, cy, w, shift=(0, 0)):
@@ -346,23 +510,36 @@ def shade_bottom(fr, h=260, k=0.35):
 _GLOW = {}
 
 
+def _glow(key, draw, sigma):
+    """Мягкое пятно света: рисуется в 1/4 размера и растягивается — в десятки раз быстрее."""
+    g = _GLOW.get(key)
+    if g is None:
+        q = 4
+        sm = np.zeros((H // q, W // q, 3), np.uint8)
+        draw(sm, q)
+        sm = cv2.GaussianBlur(sm, (0, 0), max(0.5, sigma / q))
+        g = cv2.resize(sm, (W, H), interpolation=cv2.INTER_LINEAR)
+        if len(_GLOW) > 60:
+            _GLOW.clear()
+        _GLOW[key] = g
+    return g
+
+
 def glow_circle(fr, x, y, r, color, sigma=120, amount=1.0):
     """Мягкое свечение-круг (добавляется к кадру)."""
-    key = ('c', int(x), int(y), int(r), tuple(color), sigma)
-    if key not in _GLOW:
-        g = np.zeros((H, W, 3), np.uint8)
-        cv2.circle(g, (int(x), int(y)), int(r), tuple(int(v) for v in color), -1)
-        _GLOW[key] = cv2.GaussianBlur(g, (0, 0), sigma)
-    _add(fr, _GLOW[key], amount)
+    c = tuple(int(v) for v in color)
+    g = _glow(('c', int(x), int(y), int(r), c, sigma),
+              lambda sm, q: cv2.circle(sm, (int(x / q), int(y / q)), max(1, int(r / q)), c, -1, cv2.LINE_AA), sigma)
+    _add(fr, g, amount)
 
 
 def glow_ellipse(fr, x, y, rx, ry, color, sigma=120, amount=1.0):
-    key = ('e', int(x), int(y), int(rx), int(ry), tuple(color), sigma)
-    if key not in _GLOW:
-        g = np.zeros((H, W, 3), np.uint8)
-        cv2.ellipse(g, (int(x), int(y)), (int(rx), int(ry)), 0, 0, 360, tuple(int(v) for v in color), -1)
-        _GLOW[key] = cv2.GaussianBlur(g, (0, 0), sigma)
-    _add(fr, _GLOW[key], amount)
+    """Мягкое свечение-эллипс (добавляется к кадру)."""
+    c = tuple(int(v) for v in color)
+    g = _glow(('e', int(x), int(y), int(rx), int(ry), c, sigma),
+              lambda sm, q: cv2.ellipse(sm, (int(x / q), int(y / q)), (max(1, int(rx / q)), max(1, int(ry / q))), 0, 0,
+                                        360, c, -1, cv2.LINE_AA), sigma)
+    _add(fr, g, amount)
 
 
 def _add(fr, g, amount):

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+*/.cache/
+project/exports/
+project/_versions/
+project/scenes/_history/
+project/scenes/_trash/
+library/_trash/
+*.part

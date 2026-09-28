@@ -1,0 +1,49 @@
+{
+  "name": "Фото/видео + подпись",
+  "category": "Медиа",
+  "dur": 4.0,
+  "desc": "Выберите картинку или видео во вкладке «Слои» — остальное уже настроено",
+  "layers": [
+    {
+      "type": "image",
+      "src": "",
+      "fit": "cover",
+      "motion": "zoom_in",
+      "motion_amt": 0.08,
+      "fade_in": 0,
+      "fade_out": 0
+    },
+    {
+      "type": "text",
+      "text": "Подпись к кадру",
+      "font": "serif",
+      "weight": 500,
+      "size": 62,
+      "pos": "lower",
+      "anim": "rise",
+      "start": 0.4,
+      "fade_in": 0.6,
+      "fade_out": 0.4,
+      "track": 0.01
+    }
+  ],
+  "fx": [
+    {
+      "name": "grade",
+      "preset": "teal_orange",
+      "strength": 0.6
+    },
+    {
+      "name": "shade_bottom",
+      "amount": 0.55
+    },
+    {
+      "name": "fade_in",
+      "dur": 0.4
+    }
+  ],
+  "texts": {},
+  "builtin": true,
+  "assets": [],
+  "created": 0
+}
