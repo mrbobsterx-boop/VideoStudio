@@ -264,10 +264,12 @@ class H(BaseHTTPRequestHandler):
                 S.cancel_export()
                 return self.js(dict(ok=True))
             if p == '/api/open':
-                what = self.jbody().get('what', 'exports')
+                b = self.jbody()
+                what = b.get('what', 'exports')
                 path = os.path.join(S.dir, what if what in ('exports', 'assets', 'scenes', 'audio') else '')
-                open_folder(path)
-                return self.js(dict(ok=True, path=path))
+                sel = os.path.join(path, os.path.basename(b['file'])) if b.get('file') else None
+                err = open_folder(path, sel)
+                return self.js(dict(ok=not err, path=sel or path, error=err))
             return self.send(404, 'not found', 'text/plain')
         except KeyError as e:
             return self.js(dict(error='not found: %s' % e), 404)
@@ -323,16 +325,25 @@ def _has_alpha(path):
     return _ALPHA[k]
 
 
-def open_folder(path):
+def open_folder(path, select=None):
+    """Открывает папку в проводнике; если задан select — выделяет этот файл.
+    Возвращает текст ошибки или None."""
+    if select and not os.path.isfile(select):
+        select = None
     try:
+        os.makedirs(path, exist_ok=True)
         if sys.platform.startswith('win'):
-            os.startfile(path)
+            if select:
+                subprocess.Popen('explorer /select,"%s"' % os.path.normpath(select))
+            else:
+                subprocess.Popen(['explorer', os.path.normpath(path)])
         elif sys.platform == 'darwin':
-            subprocess.Popen(['open', path])
+            subprocess.Popen(['open', '-R', select] if select else ['open', path])
         else:
             subprocess.Popen(['xdg-open', path])
-    except Exception:
-        pass
+    except Exception as e:
+        return str(e)
+    return None
 
 
 def free_port(start):

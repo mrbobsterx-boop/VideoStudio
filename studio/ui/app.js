@@ -786,8 +786,16 @@ function updateExport() {
     toast(`<b>Видео готово</b> за ${x.seconds} с: ${esc(x.file)}
       <div class="acts"><a href="/exports/${encodeURIComponent(x.file)}" target="_blank">Смотреть</a>
       <a href="/exports/${encodeURIComponent(x.file)}?dl=1">Скачать</a>
-      <a href="#" id="openEx">Открыть папку</a></div>`, 0);
-    const o = $('openEx'); if (o) o.onclick = ev => { ev.preventDefault(); api.post('/api/open', { what: 'exports' }); };
+      <a href="#" id="openEx">Открыть папку</a></div>
+      <div class="path" title="Где лежит файл">${esc(x.path || '')}</div>
+      <div class="path" id="openRes"></div>`, 0);
+    const o = $('openEx'); if (o) o.onclick = async ev => {
+      ev.preventDefault();
+      const r = await api.post('/api/open', { what: 'exports', file: x.file });
+      const res = $('openRes'); if (!res) return;
+      res.textContent = r && r.error ? 'Не удалось открыть папку: ' + r.error
+        : 'Окно папки открыто — если его не видно, оно может быть позади браузера (посмотрите на панели задач).';
+    };
   } else if (x.state === 'error') {
     toast(`<b style="color:var(--red)">Экспорт не удался</b><pre class="err" style="max-height:200px">${esc(x.msg)}</pre>`, 0);
   }

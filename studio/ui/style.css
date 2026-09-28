@@ -219,6 +219,7 @@ input[type=range] { accent-color: var(--ember); }
   border-radius: 8px; padding: 12px 14px; max-width: 420px; box-shadow: 0 14px 40px rgba(0,0,0,.55);
 }
 .toast .acts { display: flex; gap: 8px; margin-top: 8px; }
+.toast .path { margin-top: 6px; font-size: 11px; opacity: .7; word-break: break-all; user-select: text; }
 .toast a { color: var(--ember); }
 
 @media (max-width: 1100px) {
