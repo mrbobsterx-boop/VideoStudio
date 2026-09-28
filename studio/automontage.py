@@ -4,7 +4,6 @@
 переходы, цветокоррекция и подписи — всё это потом можно поменять руками во вкладках «Слои» и «Эффекты».
 Если загружена музыка — склейки ставятся в такт (по найденным долям).
 """
-import os
 import random
 
 import numpy as np
@@ -80,31 +79,13 @@ def analyze_music(samples, sr):
 
 # ------------------------------------------------------------------ сборка
 def media_list(studio):
-    from . import media
-    d = os.path.join(studio.dir, 'assets')
+    """Картинки и видео, пригодные для кадра во весь экран (без вырезанных объектов и крошечных иконок)."""
     out = []
-    for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
-        stem, ext = os.path.splitext(f)
-        ext = ext.lower()
-        p = os.path.join(d, f)
-        if ext in engine.VIDEO_EXT:
-            try:
-                i = media.info(p)
-            except Exception:
-                continue
-            out.append(dict(name=stem, file=f, kind='video', dur=i['dur'], w=i['w'], h=i['h']))
-        elif ext in engine.IMG_EXT:
-            try:
-                from PIL import Image
-                with Image.open(p) as im:
-                    w, h = im.size
-                    alpha = ext == '.png' and im.mode in ('RGBA', 'LA', 'P')
-            except Exception:
-                continue
-            # вырезанные объекты и крошечные иконки на весь кадр не годятся
-            if alpha or max(w, h) < 500:
-                continue
-            out.append(dict(name=stem, file=f, kind='image', dur=0, w=w, h=h))
+    for m in studio.list_media():
+        if m['kind'] == 'video':
+            out.append(dict(name=m['name'], file=m['file'], folder=m['folder'], kind='video', dur=m['dur'], w=m['w'], h=m['h']))
+        elif m['kind'] == 'image' and max(m.get('w', 0), m.get('h', 0)) >= 500:
+            out.append(dict(name=m['name'], file=m['file'], folder=m['folder'], kind='image', dur=0, w=m['w'], h=m['h']))
     return out
 
 
@@ -113,8 +94,8 @@ def music_info(studio):
     fn = a.get('music_file')
     if not fn:
         return None
-    path = os.path.join(studio.dir, 'audio', os.path.basename(fn))
-    if not os.path.isfile(path):
+    path = studio.music_path(fn)
+    if not path:
         return None
     m = studio.music_samples(path)
     tempo, beats, energy = analyze_music(m, engine.SR)
@@ -251,13 +232,15 @@ def build(studio, opts):
     if not opts.get('replace') and studio.p['scenes']:
         after = studio.p['scenes'][-1]['id']
     font = st['title_font']
+    fw, fh = studio.size
+    big = 1.0 if fw >= fh else 0.72          # в вертикальном кадре заголовки поменьше
     added = []
     if title:
-        layers = [dict(type='text', text=title, font=font, weight=700, size=150 if font == 'title' else 120,
+        layers = [dict(type='text', text=title, font=font, weight=700, size=int((150 if font == 'title' else 120) * big),
                        track=0.25 if font == 'title' else 0.02, pos='center', anim='blur', fade_in=0.9, fade_out=0.5,
                        color='#EEF0F4')]
         if subtitle:
-            layers.append(dict(type='text', text=subtitle, font='serif', weight=500, size=54, pos='custom', x=960, y=660,
+            layers.append(dict(type='text', text=subtitle, font='serif', weight=500, size=54, pos='custom', x=fw / 2, y=fh / 2 + 120,
                                align='c', anim='rise', start=0.7, fade_in=0.8, fade_out=0.5, track=0.02, color='#C9CED8'))
         fxl = [dict(name='fade_in', dur=0.6), dict(name='fade_out', dur=0.4)]
         sid = studio.add_scene(after=after, name='Титр', code=_title_code('am_title', style, with_sound), dur=title_d,
@@ -294,11 +277,11 @@ def build(studio, opts):
         added.append(sid)
         after = sid
     if end_title:
-        layers = [dict(type='text', text=end_title, font=font, weight=700, size=130 if font == 'title' else 110,
+        layers = [dict(type='text', text=end_title, font=font, weight=700, size=int((130 if font == 'title' else 110) * big),
                        track=0.2 if font == 'title' else 0.02, pos='center', anim='scale', fade_in=0.8, fade_out=0.6,
                        color='#EEF0F4')]
         if end_sub:
-            layers.append(dict(type='text', text=end_sub, font='text', weight=400, size=44, pos='custom', x=960, y=650,
+            layers.append(dict(type='text', text=end_sub, font='text', weight=400, size=44, pos='custom', x=fw / 2, y=fh / 2 + 110,
                                align='c', anim='fade', start=0.8, fade_in=0.6, fade_out=0.6, track=0.35, color='#AEB5C2'))
         sid = studio.add_scene(after=after, name='Финал', code=_title_code('am_end', style, with_sound, end=True),
                                dur=end_d, layers=layers, fx=[dict(name='fade_in', dur=0.5), dict(name='fade_out', dur=1.2)])

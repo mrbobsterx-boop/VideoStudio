@@ -31,63 +31,169 @@ function fmtVal(el) {
 
 // ================================================================== медиа (список файлов)
 let ASSETS = [];
+const KIND_LABEL = { video: 'видео', image: 'картинка', sprite: 'вырезанный', audio: 'музыка / звук' };
+const KIND_TABS = [['all', 'Все'], ['video', 'Видео'], ['image', 'Картинки'], ['sprite', 'Вырезанные'], ['audio', 'Музыка']];
+const fmtDur = d => d >= 60 ? `${Math.floor(d / 60)}:${String(Math.round(d % 60)).padStart(2, '0')}` : `${(+d).toFixed(1)} с`;
+const baseName = n => n.split('/').pop();
 async function loadAssets() {
   ASSETS = await api.get('/api/assets');
   if (!Array.isArray(ASSETS)) ASSETS = [];
-  renderAssets();
+  if (mediaTab) mediaTab.refresh();
   return ASSETS;
 }
 X.loadAssets = loadAssets;
 X.assets = () => ASSETS;
-let assetFilter = 'all';
-function renderAssets() {
-  const list = ASSETS.filter(a => assetFilter === 'all' || a.kind === assetFilter);
-  $('assetGrid').innerHTML = list.map(a => `<div class="asset" data-name="${esc(a.name)}" data-kind="${a.kind}" title="${esc(a.file)}">
-    <div class="th"><img loading="lazy" src="/api/thumb?name=${encodeURIComponent(a.name)}&v=${a.mtime}" alt=""></div>
-    ${a.kind === 'video' ? `<span class="dur">${(+a.dur).toFixed(1)} с</span>` : ''}
-    <div class="nm">${esc(a.name)}</div><div class="kind"><b>${{ video: 'видео', image: 'картинка', sprite: 'вырезанный' }[a.kind]}</b>${a.w ? `${a.w}×${a.h}` : ''}</div></div>`).join('')
-    || '<div class="empty" style="grid-column:1/-1"><b>Пока пусто</b>Перетащите сюда картинки или видео</div>';
+
+// общий плеер для прослушивания треков в сетках
+const pv = new Audio();
+let pvRef = null;
+function playAudio(ref, btn) {
+  document.querySelectorAll('.mtile .playbtn.on').forEach(b => { b.classList.remove('on'); b.innerHTML = icon('play'); });
+  if (pvRef === ref && !pv.paused) { pv.pause(); pvRef = null; return; }
+  pv.src = '/api/audiofile?ref=' + encodeURIComponent(ref); pv.play().catch(() => {}); pvRef = ref;
+  if (btn) { btn.classList.add('on'); btn.innerHTML = icon('pause'); }
 }
-document.querySelectorAll('[data-af]').forEach(b => b.onclick = () => {
-  assetFilter = b.dataset.af;
-  document.querySelectorAll('[data-af]').forEach(x => x.classList.toggle('on', x === b));
-  renderAssets();
-});
-$('assetGrid').addEventListener('click', e => {
-  const a = e.target.closest('.asset');
-  if (!a) return;
-  const name = a.dataset.name, kind = a.dataset.kind;
-  if (e.altKey) {
-    const snip = kind === 'video' ? `video('${name}', t)` : kind === 'sprite' ? `sprite('${name}')` : `image('${name}')`;
-    X.switchTab('code'); X.ed.insert(snip);
-    toast(`Вставлено в код: <code>${esc(snip)}</code>`, 2500);
-    return;
+pv.onended = () => { pvRef = null; document.querySelectorAll('.mtile .playbtn.on').forEach(b => { b.classList.remove('on'); b.innerHTML = icon('play'); }); };
+X.stopAudioPreview = () => { pv.pause(); pvRef = null; };
+
+/* Визуальный выбор медиа: папки, типы, поиск, сетка с превью.
+   opts: kinds — какие типы показывать; mode: 'multi' | 'single' | 'action';
+         selected — Set имён; filter(item) — доп. отбор; onChange(set); onAction(item, event) */
+function mediaPicker(host, opts = {}) {
+  const kinds = opts.kinds || ['video', 'image', 'sprite', 'audio'];
+  const mode = opts.mode || 'multi';
+  const sel = opts.selected || new Set();
+  let folder = '*', kind = opts.kind || 'all', q = '';
+  host.classList.add('mpicker');
+  const items = () => (opts.items ? opts.items() : ASSETS).filter(a => kinds.includes(a.kind) && (!opts.filter || opts.filter(a)));
+  function visible() {
+    return items().filter(a => (folder === '*' || a.folder === folder) && (kind === 'all' || a.kind === kind) &&
+      (!q || a.name.toLowerCase().includes(q)));
   }
-  if (!X.sel) return toast('Сначала выберите сцену на таймлайне');
-  addLayer(kind === 'video' ? 'video' : 'image', name, kind === 'sprite');
-});
-async function uploadFiles(files) {
+  function render() {
+    const all = items();
+    const folders = [...new Set(all.map(a => a.folder))].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b));
+    const count = k => all.filter(a => (folder === '*' || a.folder === folder) && (k === 'all' || a.kind === k)).length;
+    const tabs = KIND_TABS.filter(([k]) => k === 'all' || kinds.includes(k)).filter(([k]) => k === 'all' || count(k));
+    const vis = visible();
+    host.innerHTML = `<div class="mp-bar">
+      ${folders.length > 1 || (folders[0] && folders[0] !== '') ? `<div class="chips">${[['*', 'Все папки']].concat(folders.map(f => [f, f || 'Без папки'])).map(([f, l]) =>
+        `<button class="chip ${folder === f ? 'on' : ''}" data-folder="${esc(f)}">${f === '*' ? icon('lib') : icon('folder')}${esc(l)}</button>`).join('')}</div>` : ''}
+      <div class="mp-row"><div class="seg-tabs flat">${tabs.map(([k, l]) => `<button data-kind="${k}" class="${kind === k ? 'on' : ''}">${l} <i>${count(k)}</i></button>`).join('')}</div>
+        <input class="search mp-q" placeholder="Поиск по имени…" value="${esc(q)}">
+        ${mode === 'multi' ? `<span class="mp-sel">выбрано <b>${[...sel].filter(n => all.some(a => a.name === n)).length}</b></span>
+          <button class="ghost small" data-all="1">Выбрать видимые</button><button class="ghost small" data-all="0">Снять</button>` : ''}</div></div>
+      <div class="asset-grid">${vis.map(tile).join('') || '<div class="empty" style="grid-column:1/-1"><b>Здесь пусто</b>Добавьте файлы или выберите другую папку</div>'}</div>`;
+    const qi = host.querySelector('.mp-q');
+    qi.oninput = () => { q = qi.value.trim().toLowerCase(); const pos = qi.selectionStart; render(); const n = host.querySelector('.mp-q'); n.focus(); n.setSelectionRange(pos, pos); };
+  }
+  function tile(a) {
+    const on = mode !== 'action' && sel.has(a.name);
+    const meta = a.kind === 'audio' ? fmtDur(a.dur || 0) : (a.w ? `${a.w}×${a.h}` : '');
+    const th = a.kind === 'audio'
+      ? `<div class="th audio">${icon('volume')}<button class="playbtn" data-play="${esc(a.ref)}" title="Послушать">${icon('play')}</button></div>`
+      : `<div class="th"><img loading="lazy" src="/api/thumb?name=${encodeURIComponent(a.name)}&v=${a.mtime}" alt=""></div>`;
+    return `<div class="asset mtile ${on ? 'on' : ''}" data-name="${esc(a.name)}" data-kind="${a.kind}" title="${esc(a.name)}">
+      ${th}${a.kind === 'video' ? `<span class="dur">${fmtDur(a.dur || 0)}</span>` : ''}${mode !== 'action' ? `<span class="tick">${icon('check')}</span>` : ''}
+      ${a.is_music ? '<span class="musictag">♪ в ролике</span>' : ''}
+      <div class="nm">${esc(baseName(a.name))}</div><div class="kind"><b>${KIND_LABEL[a.kind]}</b>${meta}</div></div>`;
+  }
+  host.addEventListener('click', e => {
+    const pb = e.target.closest('[data-play]');
+    if (pb) { e.stopPropagation(); playAudio(pb.dataset.play, pb); return; }
+    const f = e.target.closest('[data-folder]'); if (f) { folder = f.dataset.folder; render(); return; }
+    const k = e.target.closest('[data-kind]'); if (k && k.tagName === 'BUTTON') { kind = k.dataset.kind; render(); return; }
+    const all = e.target.closest('[data-all]');
+    if (all) { visible().forEach(a => all.dataset.all === '1' ? sel.add(a.name) : sel.delete(a.name)); render(); opts.onChange && opts.onChange(sel); return; }
+    const t = e.target.closest('.mtile'); if (!t) return;
+    const item = items().find(a => a.name === t.dataset.name);
+    if (!item) return;
+    if (mode === 'action') { opts.onAction && opts.onAction(item, e); return; }
+    if (mode === 'single') { const was = sel.has(item.name); sel.clear(); if (!was) sel.add(item.name); }
+    else sel.has(item.name) ? sel.delete(item.name) : sel.add(item.name);
+    render(); opts.onChange && opts.onChange(sel, item);
+  });
+  render();
+  return { refresh: render, selected: () => sel };
+}
+X.mediaPicker = mediaPicker;
+
+// ---------------- вкладка «Медиа»
+let mediaTab = null;
+function initMediaTab() {
+  mediaTab = mediaPicker($('assetGrid'), {
+    mode: 'action',
+    onAction: async (a, e) => {
+      if (a.kind === 'audio') {
+        if (a.is_music) return toast('Этот трек уже звучит в ролике. Громкость и сдвиг — в «Настройках».');
+        if (!confirm(`Сделать «${baseName(a.name)}» музыкой ролика?`)) return;
+        const r = await api.post('/api/audio', { music_file: a.ref });
+        toast(r.error ? 'Ошибка: ' + esc(r.error) : 'Музыка ролика заменена. Звук пересводится…');
+        X.refresh(); loadAssets(); return;
+      }
+      if (e.altKey) {
+        const snip = a.kind === 'video' ? `video('${a.name}', t)` : a.kind === 'sprite' ? `sprite('${a.name}')` : `image('${a.name}')`;
+        X.switchTab('code'); X.ed.insert(snip);
+        toast(`Вставлено в код: <code>${esc(snip)}</code>`, 2500);
+        return;
+      }
+      if (!X.sel) return toast('Сначала выберите сцену на таймлайне');
+      addLayer(a.kind === 'video' ? 'video' : 'image', a.name, a.kind === 'sprite');
+    },
+  });
+}
+const MEDIA_RE = /\.(mp4|mov|webm|mkv|m4v|avi|png|jpe?g|webp|mp3|wav|ogg|m4a|aac|flac)$/i;
+async function uploadFiles(list) {
+  // list: [{file, folder}]
   const cut = $('cutout').checked ? 1 : 0;
   const box = $('uploadProg'), bar = box.querySelector('i'), lab = box.querySelector('span');
-  let n = 0;
-  for (const f of files) {
-    const isVid = /^video\//.test(f.type) || /\.(mp4|mov|webm|mkv|m4v|avi)$/i.test(f.name);
-    const isImg = /^image\//.test(f.type);
-    if (!isVid && !isImg) { toast('Пропущен файл ' + esc(f.name) + ': нужна картинка или видео'); continue; }
-    box.hidden = false; bar.style.width = '0%'; lab.textContent = `Загружаю ${f.name}…`;
-    const r = await api.upload(`/api/assets/upload?name=${encodeURIComponent(f.name)}&cutout=${isImg ? cut : 0}`, f,
-      p => { bar.style.width = Math.round(p * 100) + '%'; lab.textContent = `Загружаю ${f.name} — ${Math.round(p * 100)}%`; });
+  let n = 0, i = 0;
+  const todo = list.filter(x => MEDIA_RE.test(x.file.name));
+  const skipped = list.length - todo.length;
+  for (const { file: f, folder } of todo) {
+    i++;
+    const isImg = /\.(png|jpe?g|webp)$/i.test(f.name);
+    box.hidden = false; bar.style.width = '0%';
+    const label = `${todo.length > 1 ? `(${i}/${todo.length}) ` : ''}${folder ? folder + '/' : ''}${f.name}`;
+    lab.textContent = 'Загружаю ' + label;
+    const r = await api.upload(`/api/assets/upload?name=${encodeURIComponent(f.name)}&cutout=${isImg ? cut : 0}&folder=${encodeURIComponent(folder || '')}`, f,
+      p => { bar.style.width = Math.round(p * 100) + '%'; lab.textContent = `Загружаю ${label} — ${Math.round(p * 100)}%`; });
     if (r.error) toast('Ошибка: ' + esc(r.error)); else n++;
   }
   box.hidden = true;
-  if (n) toast(`Добавлено файлов: ${n}. Нажмите на файл, чтобы поставить его слоем в сцену.`);
-  loadAssets();
+  if (n) toast(`Добавлено файлов: ${n}${skipped ? ` (пропущено неподходящих: ${skipped})` : ''}. Нажмите на файл, чтобы поставить его в сцену.`);
+  else if (skipped) toast('В папке нет картинок, видео или музыки');
+  await loadAssets();
 }
-$('assetFile').addEventListener('change', e => { uploadFiles([...e.target.files]); e.target.value = ''; });
+X.uploadFiles = uploadFiles;
+$('assetFile').addEventListener('change', e => { uploadFiles([...e.target.files].map(file => ({ file, folder: '' }))); e.target.value = ''; });
+$('assetDir').addEventListener('change', e => {
+  const files = [...e.target.files]; e.target.value = '';
+  uploadFiles(files.map(file => ({ file, folder: (file.webkitRelativePath || '').split('/')[0] || '' })));
+});
+// перетаскивание файлов и целых папок
+async function readEntry(entry, folder, out) {
+  if (entry.isFile) { await new Promise(res => entry.file(f => { out.push({ file: f, folder }); res(); }, res)); return; }
+  if (entry.isDirectory) {
+    const reader = entry.createReader();
+    let batch;
+    do {
+      batch = await new Promise(res => reader.readEntries(res, () => res([])));
+      for (const e of batch) await readEntry(e, folder || entry.name, out);
+    } while (batch.length);
+  }
+}
 const at = $('tab-assets');
 at.addEventListener('dragover', e => { e.preventDefault(); at.classList.add('drop'); });
 at.addEventListener('dragleave', () => at.classList.remove('drop'));
-at.addEventListener('drop', e => { e.preventDefault(); at.classList.remove('drop'); uploadFiles([...e.dataTransfer.files]); });
+at.addEventListener('drop', async e => {
+  e.preventDefault(); at.classList.remove('drop');
+  const items = [...(e.dataTransfer.items || [])].map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+  if (!items.length) return uploadFiles([...e.dataTransfer.files].map(file => ({ file, folder: '' })));
+  const out = [];
+  for (const en of items) await readEntry(en, en.isDirectory ? en.name : '', out);
+  uploadFiles(out);
+});
 $('openAssets').onclick = () => api.post('/api/open', { what: 'assets' }).then(r => toast(r.error ? esc(r.error) : 'Папка открыта:<div class="path">' + esc(r.path) + '</div>'));
 
 // ================================================================== шрифты
@@ -230,7 +336,7 @@ function layerBody(L) {
     h += fSel('font', 'Шрифт', L.font, fontOpts()) + fRange('weight', 'Толщина', L.weight, 100, 900, 50);
     h += fRange('size', 'Размер', L.size, 12, 400, 2) + `<label class="f"><span>Цвет</span><input type="color" data-k="color" value="${esc(L.color || '#ECE4D6')}"></label>`;
     h += fSel('pos', 'Положение', L.pos, POS) + fSel('anim', 'Анимация', L.anim, ANIMS);
-    if (L.pos === 'custom') h += fNum('x', 'X, px (0–1920)', L.x, 10) + fNum('y', 'Y, px (0–1080)', L.y, 10) + fSel('align', 'Выравнивание', L.align, [['c', 'по центру'], ['l', 'от левого края'], ['r', 'к правому краю']]);
+    if (L.pos === 'custom') h += fNum('x', `X, px (0–${fw()})`, L.x, 10) + fNum('y', `Y, px (0–${fh()})`, L.y, 10) + fSel('align', 'Выравнивание', L.align, [['c', 'по центру'], ['l', 'от левого края'], ['r', 'к правому краю']]);
     h += fRange('track', 'Разрядка', L.track, -0.1, 1, 0.01) + fRange('line', 'Межстрочный', L.line, 0.7, 2.5, 0.05);
     h += fRange('plate', 'Плашка под текстом', L.plate, 0, 1, 0.05) + fChk('shadow', 'Тень', L.shadow);
   } else {
@@ -320,10 +426,11 @@ function onLayerField(e, live) {
 }
 $('layerList').addEventListener('input', e => { if (e.target.type === 'range' || e.target.tagName === 'TEXTAREA' || e.target.type === 'color') onLayerField(e, true); });
 $('layerList').addEventListener('change', e => onLayerField(e, false));
+const fw = () => (X.ST && X.ST.size ? X.ST.size[0] : 1920), fh = () => (X.ST && X.ST.size ? X.ST.size[1] : 1080);
 function newLayer(type, src, sprite) {
   const base = { id: '', type, start: 0, end: null, z: 'top', opacity: 1, fade_in: 0.3, fade_out: 0.3, hidden: false };
-  if (type === 'text') return Object.assign(base, { text: 'Новый текст', font: 'title', weight: 700, size: 110, color: '#ECE4D6', pos: 'center', anim: 'rise', track: 0.08, line: 1.15, plate: 0, shadow: true, align: 'c', x: 960, y: 540 });
-  const L = Object.assign(base, { src: src || '', fit: sprite ? 'free' : 'cover', area: 'visible', x: 960, y: 540, scale: 1, rotate: 0, focus_x: 0.5, focus_y: 0.5,
+  if (type === 'text') return Object.assign(base, { text: 'Новый текст', font: 'title', weight: 700, size: 110, color: '#ECE4D6', pos: 'center', anim: 'rise', track: 0.08, line: 1.15, plate: 0, shadow: true, align: 'c', x: fw() / 2, y: fh() / 2 });
+  const L = Object.assign(base, { src: src || '', fit: sprite ? 'free' : 'cover', area: 'visible', x: fw() / 2, y: fh() / 2, scale: 1, rotate: 0, focus_x: 0.5, focus_y: 0.5,
     blend: 'normal', motion: sprite ? 'none' : 'zoom_in', motion_amt: 0.08, sat: 1, con: 1, bright: 1, blur: 0, gray: 0, grade: '', radius: 0 });
   if (type === 'video') Object.assign(L, { trim: 0, speed: 1, loop: true, volume: 0 });
   return L;
@@ -436,5 +543,6 @@ X.hooks.tab.push(name => {
   if (name === 'fx') syncFromState(false);
   if (name === 'settings') loadFonts();
 });
+initMediaTab();
 Promise.all([loadFx(), loadAssets(), loadFonts()]).then(() => syncFromState(true));
 })();

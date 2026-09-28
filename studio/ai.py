@@ -81,35 +81,20 @@ def sound_reference():
 
 
 def assets_list(studio, names=None):
-    from . import media
-    d = os.path.join(studio.dir, 'assets')
     rows = []
-    for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
-        stem, ext = os.path.splitext(f)
-        ext = ext.lower()
-        if names and stem not in names:
+    for m in studio.list_media():
+        if names and m['name'] not in names:
             continue
-        p = os.path.join(d, f)
-        if ext in engine.VIDEO_EXT:
-            try:
-                i = media.info(p)
-                rows.append("- `video('%s', t)` — видео %dx%d, %.1f с" % (stem, i['w'], i['h'], i['dur']))
-            except Exception:
-                rows.append("- `video('%s', t)` — видео" % stem)
-        elif ext in engine.IMG_EXT:
-            try:
-                from PIL import Image
-                with Image.open(p) as im:
-                    w, h = im.size
-                    alpha = im.mode in ('RGBA', 'LA', 'P') and ext == '.png'
-            except Exception:
-                w = h = 0
-                alpha = False
-            if alpha:
-                rows.append("- `sprite('%s')` — вырезанный объект с прозрачностью, %dx%d" % (stem, w, h))
-            else:
-                rows.append("- `image('%s')` — картинка %dx%d" % (stem, w, h))
-    return '\n'.join(rows) or '- (картинок пока нет — используйте только графику из кода)'
+        n, k = m['name'], m['kind']
+        if k == 'video':
+            rows.append("- `video('%s', t)` — видео %dx%d, %.1f с" % (n, m['w'], m['h'], m['dur']))
+        elif k == 'sprite':
+            rows.append("- `sprite('%s')` — вырезанный объект с прозрачностью, %dx%d" % (n, m['w'], m['h']))
+        elif k == 'image':
+            rows.append("- `image('%s')` — картинка %dx%d" % (n, m['w'], m['h']))
+        elif k == 'audio':
+            rows.append("- `a.clip('%s', t0, g)` — звук/музыка %.1f с (только в sound())" % (n, m['dur']))
+    return '\n'.join(rows) or '- (файлов пока нет — используйте только графику из кода)'
 
 
 def _example(studio, sid=None):
@@ -139,11 +124,15 @@ def brief(studio, goal='', dur=4.0, name='', assets=None, style='', example_sid=
                     if f.lower().endswith(('.ttf', '.otf'))}) if os.path.isdir(fonts_dir) else []
     prefix = engine.slug(prefix or name or 'scene')[:16]
     dur = float(dur or 4)
+    kit.set_frame(*studio.size)
+    fw, fh = studio.size
     safe = ('Полезная область кадра — между кинополосами: по вертикали от VY=%d до VY+VH=%d (полосы включены). '
-            'Всё важное держите внутри неё.' % (kit.VY, kit.VY + kit.VH)) if look.get('letterbox', True) else \
-        'Кинополосы выключены — можно использовать весь кадр 1920×1080.'
+            'Всё важное держите внутри неё.' % (kit.VY, kit.VY + kit.VH)) if (look.get('letterbox', True) and fw > fh) else \
+        'Кинополос нет — используйте весь кадр %d×%d.' % (fw, fh)
     scene_list = '\n'.join('%d. %s (%.1f с)%s' % (i + 1, n, d, (' — ' + doc) if doc else '') for i, (n, doc, d) in enumerate(scenes[:40]))
     example = _example(studio, example_sid)
+    fmt_name = {'16:9': 'горизонтальный 16:9', '9:16': 'вертикальный 9:16 (Reels, Shorts, TikTok)',
+                '1:1': 'квадратный 1:1'}.get(studio.p.get('format', '16:9'), '16:9')
     text = f"""# Задание: одна сцена для видеоредактора Shelter Studio (Python)
 
 Ты пишешь **один файл сцены** на Python для видеоредактора Shelter Studio. Редактор сам вызывает функции сцены
@@ -163,7 +152,7 @@ def brief(studio, goal='', dur=4.0, name='', assets=None, style='', example_sid=
 2. Вторая строка — `from studio.kit import *` . Больше ничего импортировать нельзя, кроме `math`, `random`
    (уже доступны `np` = numpy, `cv2` = OpenCV, `math`). Запрещены файлы, сеть, `os`, `sys`, `subprocess`, `open`, `eval`, `exec`.
 3. Обязательно функция `def render(fr, t, dur):` — рисует ОДИН кадр:
-   - `fr` — numpy-массив 1080×1920×3, RGB, uint8. Рисовать прямо в него (изменять на месте), ничего не возвращать.
+   - `fr` — numpy-массив {fh}×{fw}×3 (высота×ширина), RGB, uint8. Рисовать прямо в него (изменять на месте), ничего не возвращать.
    - `t` — секунды от начала сцены (0 … dur), `dur` — длина сцены.
    - Кадры считаются независимо и в любом порядке: НЕ храни состояние между вызовами, всё вычисляй из `t`.
    - Сначала закрась весь кадр (например `darkbg(fr)` или `cover(fr, image('...'))`), иначе останется мусор.
@@ -176,7 +165,7 @@ def brief(studio, goal='', dur=4.0, name='', assets=None, style='', example_sid=
    Ключи начинай с `{prefix}_`, чтобы они не пересеклись с другими сценами. Тексты — на языке ролика.
 7. Кадр должен считаться быстро: меньше ~0.3 с. Не делай циклы по пикселям на Python — используй numpy/cv2
    и готовые функции ниже. Тяжёлое (размытие больших картинок) — через параметры `image(..., blur=)`, они кэшируются.
-8. Размеры: `W, H` = 1920, 1080. {safe}
+8. Кадр {fmt_name}: `W, H` = {fw}, {fh}. Используй W и H, а не числа, для позиций. {safe}
 9. Цвета — кортежи RGB `(r, g, b)` 0..255. Готовые: `CREAM, EMBER, RED, WHITE, BLACK`.
 10. Появление/исчезновение делай плавным (`prog`, `oc`, `ioc`, параметры `fin`/`fout` у текстов).
 
@@ -185,7 +174,7 @@ def brief(studio, goal='', dur=4.0, name='', assets=None, style='', example_sid=
 `fam='text'` → {roles.get('text')}. Файлы шрифтов проекта: {', '.join(fonts) or 'нет'}.
 `bold()` использует роль title, `serif()` — serif, `text()` — text. `w=` — толщина (200..700 для переменных шрифтов).
 
-## Картинки и видео проекта (только эти имена!)
+## Картинки, видео и звуки проекта (только эти имена!)
 {assets_list(studio, assets)}
 
 Видео: `frame = video('имя', t, start=0, speed=1)` возвращает кадр видео как картинку;

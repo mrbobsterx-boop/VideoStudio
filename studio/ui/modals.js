@@ -123,7 +123,7 @@ X.saveToLibrary = async () => {
 // ================================================================== сцена от ИИ
 let aiState = { goal: '', name: '', dur: 4, style: '', brief: '', answer: '', check: null };
 async function openAI() {
-  if (!X.assets().length) await X.loadAssets();
+  await X.loadAssets();
   const body = X.openModal('Сцена от ИИ', '');
   const assets = X.assets();
   body.innerHTML = `<div class="mgrid">
@@ -134,7 +134,7 @@ async function openAI() {
       <label style="max-width:120px">Длина, с<input class="mfield" id="aiDur" type="number" step="0.5" min="0.5" value="${aiState.dur}"></label></div>
     <label class="mnote">Стиль (необязательно)<input class="mfield" id="aiStyle" value="${esc(aiState.style)}" placeholder="мрачный кинотрейлер / яркий и быстрый / минимализм"></label>
     <label class="mnote">Картинки и видео, которые можно использовать (ничего не выбрано — все)
-      <select class="mfield" id="aiAssets" multiple size="4">${assets.map(a => `<option value="${esc(a.name)}">${esc(a.name)} — ${a.kind === 'video' ? 'видео' : a.kind === 'sprite' ? 'вырезанный' : 'картинка'}</option>`).join('')}</select></label>
+</label><div id="aiAssets"></div>
     <div class="mrow"><button class="solid-accent" id="aiMake" style="padding:9px 16px;border-radius:8px">${icon('ai')}Составить задание для ИИ</button></div>
     <div id="aiBriefBox" ${aiState.brief ? '' : 'hidden'}>
       <div class="mrow" style="justify-content:space-between;margin-bottom:6px"><span class="mnote">Задание готово — скопируйте его целиком и отправьте ИИ (ChatGPT, Claude и т.п.)</span>
@@ -150,11 +150,13 @@ async function openAI() {
       <label class="ghost small filebtn">${icon('upload')}Загрузить .py<input type="file" id="aiFile" accept=".py,.txt,.md" hidden></label></div>
     <div id="aiResult"></div>
    </div></div>`;
+  if (!aiState.sel) aiState.sel = new Set();
+  const aiPick = X.mediaPicker($('aiAssets'), { mode: 'multi', selected: aiState.sel });
   const keep = () => { aiState.goal = $('aiGoal').value; aiState.name = $('aiName').value; aiState.dur = +$('aiDur').value || 4; aiState.style = $('aiStyle').value; aiState.answer = $('aiAnswer').value; };
   body.addEventListener('input', keep);
   $('aiMake').onclick = async () => {
     keep();
-    const chosen = [...$('aiAssets').selectedOptions].map(o => o.value);
+    const chosen = [...aiPick.selected()];
     const r = await api.post('/api/ai/brief', { goal: aiState.goal, name: aiState.name, dur: aiState.dur, style: aiState.style, assets: chosen, example: X.sel });
     if (r.error) return toast('Ошибка: ' + esc(r.error));
     aiState.brief = r.text;
@@ -253,6 +255,7 @@ $('verBtn').onclick = openVersions;
 let amState = { style: 'cinematic', picked: null, title: '', subtitle: '', end_title: '', end_sub: '', captions: '', duration: 0, order: 'as_is', replace: true, apply_look: true, video_volume: 0 };
 async function openAutomontage() {
   const body = X.openModal('Автомонтаж', '');
+  await X.loadAssets();
   body.innerHTML = '<p class="mnote">Загружаю список медиа и анализирую музыку…</p>';
   const info = await api.get('/api/automontage/info');
   const media = info.media || [];
@@ -263,14 +266,15 @@ async function openAutomontage() {
     <h4>Стиль</h4>
     <div class="style-cards">${info.styles.map(s => `<button class="style-card ${amState.style === s.id ? 'on' : ''}" data-style="${s.id}"><b>${esc(s.label)}</b><span>${esc(s.desc)}</span></button>`).join('')}</div>
     <h4>Что войдёт в ролик <span class="muted" id="amCount" style="text-transform:none;letter-spacing:0"></span></h4>
-    ${media.length ? `<div class="mrow"><button class="ghost small" id="amAll">Выбрать все</button><button class="ghost small" id="amNone">Снять все</button>
-      <span class="mnote">Порядок:</span><select class="select" id="amOrder"><option value="as_is">как в списке</option><option value="shuffle">перемешать</option></select></div>
-    <div class="media-pick">${media.map(m => `<div class="mp ${amState.picked.has(m.name) ? 'on' : ''}" data-n="${esc(m.name)}" title="${esc(m.name)}"><img loading="lazy" src="/api/thumb?name=${encodeURIComponent(m.name)}" alt=""><i>${m.kind === 'video' ? '▶ ' + (+m.dur).toFixed(1) + ' с' : esc(m.name.slice(0, 14))}</i></div>`).join('')}</div>`
+    ${media.length ? `<div class="mrow"><span class="mnote">Порядок:</span><select class="select" id="amOrder"><option value="as_is">как в списке</option><option value="shuffle">перемешать</option></select></div>
+    <div id="amPick"></div>`
     : `<div class="empty"><b>Нет картинок и видео</b>Загрузите их во вкладке «Медиа» (крупные фото и видео — лучше всего).</div>`}
     <h4>Музыка</h4>
     ${mus ? `<p class="mnote ok">♪ ${esc(mus.file)} — ${Math.round(mus.dur)} с${mus.tempo ? `, темп ≈ ${Math.round(mus.tempo)} уд/мин. Склейки встанут в такт.` : '. Ритм не найден — склейки будут ровными.'}</p>`
       : `<p class="mnote">Своей музыки нет — сцены получат сгенерированный звук в стиле ролика. Загрузите трек, и склейки встанут точно в такт.</p>`}
-    <div class="mrow"><label class="secondary small filebtn">${icon('upload')}${mus ? 'Заменить музыку' : 'Загрузить музыку'}<input type="file" id="amMusic" accept="audio/*" hidden></label></div>
+    <div id="amMusicPick"></div>
+    <div class="mrow"><label class="secondary small filebtn">${icon('upload')}Загрузить трек<input type="file" id="amMusic" accept="audio/*" hidden></label>
+      ${mus ? `<button class="ghost small" id="amNoMusic">Без музыки</button>` : ''}</div>
    </div>
    <div class="mcol">
     <h4>Тексты</h4>
@@ -289,16 +293,26 @@ async function openAutomontage() {
     <div class="mrow"><button class="solid-accent" id="amGo" style="padding:11px 20px;border-radius:9px;font-size:14px" ${media.length ? '' : 'disabled'}>${icon('spark')}Собрать ролик</button></div>
     <div id="amRes"></div>
    </div></div>`;
-  const count = () => { const c = $('amCount'); if (c) c.textContent = `— выбрано ${amState.picked.size} из ${media.length}`; };
+  const names = new Set(media.map(m => m.name));
+  const count = () => { const c = $('amCount'); if (c) c.textContent = `— выбрано ${[...amState.picked].filter(n => names.has(n)).length} из ${media.length}`; };
   count();
+  if ($('amPick')) X.mediaPicker($('amPick'), { mode: 'multi', kinds: ['video', 'image'], selected: amState.picked, filter: a => names.has(a.name), onChange: count });
+  const musRef = (X.assets().find(a => a.kind === 'audio' && a.is_music) || {}).name;
+  X.mediaPicker($('amMusicPick'), {
+    mode: 'single', kinds: ['audio'], selected: new Set(musRef ? [musRef] : []),
+    onChange: async (sel, item) => {
+      const pick = [...sel][0] ? item : null;
+      $('amRes').innerHTML = '<p class="mnote">Меняю музыку и ищу ритм…</p>';
+      const r = await api.post('/api/audio', { music_file: pick ? pick.ref : null });
+      if (r.error) return toast('Ошибка: ' + esc(r.error));
+      await X.loadAssets(); keep(); openAutomontage();
+    },
+  });
+  if ($('amNoMusic')) $('amNoMusic').onclick = async () => { await api.post('/api/audio', { music_file: null }); await X.loadAssets(); keep(); openAutomontage(); };
   const o = $('amOrder'); if (o) o.value = amState.order;
   body.onclick = e => {
     const st = e.target.closest('[data-style]');
     if (st) { amState.style = st.dataset.style; body.querySelectorAll('[data-style]').forEach(b => b.classList.toggle('on', b === st)); return; }
-    const mp = e.target.closest('.mp');
-    if (mp) { const n = mp.dataset.n; amState.picked.has(n) ? amState.picked.delete(n) : amState.picked.add(n); mp.classList.toggle('on'); count(); return; }
-    if (e.target.closest('#amAll')) { amState.picked = new Set(media.map(m => m.name)); body.querySelectorAll('.mp').forEach(m => m.classList.add('on')); count(); }
-    if (e.target.closest('#amNone')) { amState.picked = new Set(); body.querySelectorAll('.mp').forEach(m => m.classList.remove('on')); count(); }
   };
   const keep = () => {
     amState.title = $('amTitle').value; amState.subtitle = $('amSub').value; amState.end_title = $('amEnd').value; amState.end_sub = $('amEndSub').value;
@@ -311,7 +325,7 @@ async function openAutomontage() {
     $('amRes').innerHTML = '<p class="mnote">Загружаю и анализирую музыку…</p>';
     const r = await api.upload('/api/music/upload?name=' + encodeURIComponent(f.name), f);
     if (r.error) return toast('Ошибка: ' + esc(r.error));
-    keep(); openAutomontage();
+    await X.loadAssets(); keep(); openAutomontage();
   };
   $('amGo').onclick = async () => {
     keep();
@@ -334,4 +348,54 @@ async function openAutomontage() {
   };
 }
 $('amBtn').onclick = openAutomontage;
+
+// ================================================================== проекты
+const FMT_LABEL = { '16:9': '16:9 горизонтальный', '9:16': '9:16 вертикальный', '1:1': '1:1 квадрат' };
+async function openProjects() {
+  const body = X.openModal('Проекты', '');
+  body.innerHTML = '<p class="mnote">Загружаю список…</p>';
+  const r = await api.get('/api/projects');
+  const items = r.items || [];
+  let fmt = '16:9';
+  body.innerHTML = `<div class="mgrid" style="grid-template-columns:1.4fr 1fr">
+   <div class="mcol"><h4>Ваши ролики</h4>
+    <div class="lib-grid">${items.map(p => `<div class="lcard2 proj ${p.current ? 'cur' : ''}" data-id="${esc(p.id)}">
+      <div class="lth" style="${p.cover ? `background-image:url('/api/projects/cover?id=${encodeURIComponent(p.id)}&v=${p.mtime}')` : ''}">${p.cover ? '' : '<span class="nocover">' + icon('film') + '</span>'}</div>
+      <div class="linfo"><b>${esc(p.title)}</b>
+        <span>${esc(FMT_LABEL[p.format] || p.format)} · сцен: ${p.scenes} · ${Math.floor(p.duration / 60)}:${String(Math.round(p.duration % 60)).padStart(2, '0')}</span>
+        <span>${p.current ? '<b class="curtag">открыт сейчас</b>' : 'изменён ' + fmtDate(p.mtime)}</span>
+        <span class="ppath">${esc(p.id)}</span></div></div>`).join('')}</div>
+   </div>
+   <div class="mcol">
+    <h4>Новый проект</h4>
+    <label class="mnote">Название<input class="mfield" id="npTitle" placeholder="Например: Трейлер для Steam"></label>
+    <div class="mnote">Формат кадра</div>
+    <div class="style-cards" id="npFmt" style="grid-template-columns:repeat(3,1fr)">
+      <button class="style-card on" data-fmt="16:9"><b>16:9</b><span>YouTube, трейлер</span></button>
+      <button class="style-card" data-fmt="9:16"><b>9:16</b><span>Reels, Shorts, TikTok</span></button>
+      <button class="style-card" data-fmt="1:1"><b>1:1</b><span>квадрат, лента</span></button></div>
+    <div class="mrow"><button class="solid-accent" id="npGo" style="padding:9px 16px;border-radius:8px">${icon('plus')}Создать и открыть</button></div>
+    <p class="mnote">Новый проект — пустой ролик с одной сценой-титром. Шрифты копируются, картинки и видео добавьте во вкладке «Медиа».
+      Библиотека сцен общая для всех проектов.</p>
+    <h4>Копия текущего</h4>
+    <p class="mnote" style="margin:0">Скопировать весь открытый ролик (сцены, слои, медиа) в новый проект — удобно, чтобы сделать другую версию.</p>
+    <div class="mrow"><button class="secondary" id="npDup">${icon('copy')}Сделать копию и открыть</button></div>
+    <p class="mnote">Все проекты сохраняются сами. При следующем запуске программы откроется последний проект.</p>
+   </div></div>`;
+  $('npFmt').onclick = e => { const b = e.target.closest('[data-fmt]'); if (!b) return; fmt = b.dataset.fmt; $('npFmt').querySelectorAll('[data-fmt]').forEach(x => x.classList.toggle('on', x === b)); };
+  const go = async (url, payload, msg) => {
+    await X.flushDraft();
+    body.insertAdjacentHTML('beforeend', `<p class="mnote"><i class="spinner" style="display:inline-block;vertical-align:-2px"></i> ${msg}</p>`);
+    const res = await api.post(url, payload);
+    if (res.error) return toast('Ошибка: ' + esc(res.error));
+    location.reload();
+  };
+  $('npGo').onclick = () => go('/api/projects/new', { title: $('npTitle').value || 'Новый ролик', format: fmt }, 'Создаю проект…');
+  $('npDup').onclick = () => go('/api/projects/duplicate', {}, 'Копирую проект…');
+  body.querySelector('.lib-grid').onclick = e => {
+    const c = e.target.closest('.proj'); if (!c || c.classList.contains('cur')) return;
+    go('/api/projects/open', { id: c.dataset.id }, 'Открываю проект…');
+  };
+}
+$('projBtn').onclick = openProjects;
 })();

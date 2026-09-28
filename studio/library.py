@@ -4,7 +4,7 @@
     library/<id>/scene.py     код
     library/<id>/meta.json    название, описание, длина, слои, эффекты, тексты
     library/<id>/assets/      картинки и видео, которые нужны сцене
-    library/<id>/thumb.jpg    обложка (делается сама)
+    library/<id>/thumb_*.jpg  обложки для разных форматов (делаются сами)
 """
 import datetime
 import json
@@ -91,7 +91,7 @@ def frame(studio, i, t, width=640):
 
 def thumb(studio, i):
     m = load(i)
-    p = os.path.join(m['dir'], 'thumb.jpg')
+    p = os.path.join(m['dir'], 'thumb_%dx%d.jpg' % tuple(studio.size))     # своя обложка для каждого формата
     if os.path.isfile(p) and os.path.getmtime(p) >= os.path.getmtime(os.path.join(m['dir'], 'scene.py')):
         with open(p, 'rb') as f:
             return f.read()
@@ -143,7 +143,7 @@ def save_scene(studio, sid, name=None, desc='', category='Мои сцены'):
         json.dump(meta, f, ensure_ascii=False, indent=2)
     j = studio.scene_thumb(sid)
     if j:
-        with open(os.path.join(d, 'thumb.jpg'), 'wb') as f:
+        with open(os.path.join(d, 'thumb_%dx%d.jpg' % tuple(studio.size)), 'wb') as f:
             f.write(j)
     return iid
 

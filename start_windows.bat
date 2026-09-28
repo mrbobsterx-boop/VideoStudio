@@ -21,7 +21,7 @@ if errorlevel 1 goto fail
 if errorlevel 1 goto fail
 
 :run
-".venv\Scripts\python.exe" run.py project
+".venv\Scripts\python.exe" run.py
 pause
 exit /b
 

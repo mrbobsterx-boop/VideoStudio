@@ -54,6 +54,7 @@
   <input id="title" class="title-input" spellcheck="false" aria-label="Название проекта">
   <div class="status" id="status"></div>
   <div class="top-actions">
+    <button class="hbtn" id="projBtn" title="Все ваши ролики: открыть другой, создать новый"><svg class="ic"><use href="#i-folder"/></svg>Проекты</button>
     <button class="hbtn accent" id="amBtn" title="Собрать ролик из ваших картинок и видео автоматически"><svg class="ic"><use href="#i-spark"/></svg>Автомонтаж</button>
     <button class="hbtn" id="libBtn" title="Готовые сцены и ваши сохранённые"><svg class="ic"><use href="#i-lib"/></svg>Библиотека</button>
     <button class="hbtn" id="aiBtn" title="Задание для ИИ и проверка его кода"><svg class="ic"><use href="#i-ai"/></svg>Сцена от ИИ</button>
@@ -147,20 +148,24 @@
 
     <div class="tab" id="tab-assets">
       <div class="pane-head">
-        <label class="secondary small filebtn"><svg class="ic"><use href="#i-upload"/></svg>Добавить картинки / видео<input type="file" id="assetFile" accept="image/*,video/*,.mp4,.mov,.webm,.mkv,.m4v" multiple hidden></label>
+        <label class="secondary small filebtn"><svg class="ic"><use href="#i-upload"/></svg>Добавить файлы<input type="file" id="assetFile" accept="image/*,video/*,audio/*,.mp4,.mov,.webm,.mkv,.m4v,.mp3,.wav,.ogg,.m4a,.flac" multiple hidden></label>
+        <label class="secondary small filebtn" title="Выберите папку на компьютере — все картинки, видео и музыка из неё загрузятся в одноимённую папку"><svg class="ic"><use href="#i-folder"/></svg>Добавить папку<input type="file" id="assetDir" webkitdirectory directory multiple hidden></label>
         <label class="chk"><input type="checkbox" id="cutout"> Убрать белый фон у картинок</label>
-        <button class="ghost small" id="openAssets"><svg class="ic"><use href="#i-folder"/></svg>Папка</button>
+        <button class="ghost small" id="openAssets"><svg class="ic"><use href="#i-folder"/></svg>Открыть</button>
       </div>
       <div id="uploadProg" class="upload-prog" hidden><div class="xbar"><i></i></div><span></span></div>
-      <p class="hint">Нажмите на файл — он станет слоем выбранной сцены. <kbd>Alt</kbd>+щелчок — вставить в код
-        <code>image('имя')</code> / <code>video('имя', t)</code>. Файлы можно перетащить прямо сюда.</p>
-      <div class="asset-filter seg-tabs"><button data-af="all" class="on">Все</button><button data-af="video">Видео</button><button data-af="image">Картинки</button><button data-af="sprite">Вырезанные</button></div>
-      <div id="assetGrid" class="asset-grid"></div>
+      <p class="hint">Щелчок по картинке или видео — слой в выбранной сцене, <kbd>Alt</kbd>+щелчок — вставить в код.
+        Щелчок по треку — сделать музыкой ролика, ▶ — послушать. Файлы и целые папки можно перетащить прямо сюда.</p>
+      <div id="assetGrid"></div>
     </div>
 
     <div class="tab" id="tab-settings">
       <div class="set-group">
         <h3>Проект</h3>
+        <label class="row">Формат кадра
+          <select id="fmt" class="select" style="width:auto"><option value="16:9">16:9 — горизонтальный (YouTube, 1920×1080)</option>
+            <option value="9:16">9:16 — вертикальный (Reels, Shorts, TikTok, 1080×1920)</option>
+            <option value="1:1">1:1 — квадрат (1080×1080)</option></select></label>
         <label class="row">Кадров в секунду
           <select id="fps" class="select"><option>24</option><option>25</option><option>30</option><option>50</option><option>60</option></select></label>
       </div>
@@ -177,7 +182,7 @@
       </div>
       <div class="set-group">
         <h3>Картинка</h3>
-        <label class="row chk"><input type="checkbox" id="lkLetter"> Кинополосы сверху и снизу</label>
+        <label class="row chk"><input type="checkbox" id="lkLetter"> Кинополосы сверху и снизу <span class="muted small">(только для 16:9)</span></label>
         <label class="row chk"><input type="checkbox" id="lkVig"> Виньетка</label>
         <label class="row chk"><input type="checkbox" id="lkHits"> Тряска и вспышка на ударах (HITS)</label>
         <label class="row">Зерно плёнки <input type="range" id="lkGrain" min="0" max="0.2" step="0.01"><span id="lkGrainV" class="val"></span></label>

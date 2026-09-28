@@ -1,4 +1,4 @@
-"""Запуск редактора:  python run.py            (откроет папку project рядом)
+"""Запуск редактора:  python run.py            (откроет последний проект, в первый раз — project/)
                     python run.py path/to/project"""
 import os
 import sys

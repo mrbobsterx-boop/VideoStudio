@@ -281,7 +281,7 @@ def _draw_text(fr, L, lt, ld, op):
     color = fx._hex(L.get('color', '#ECE4D6'))
     size = int(L.get('size', 110))
     lines = s.split('\n')
-    arrs = [kit._tlayer(ln, L.get('font', 'title'), int(L.get('weight', 700)), size, color,
+    arrs = [kit.fit_text(ln, L.get('font', 'title'), int(L.get('weight', 700)), size, color,
                         float(L.get('track', 0.0)), bool(L.get('shadow', True))) for ln in lines if ln]
     if not arrs:
         return

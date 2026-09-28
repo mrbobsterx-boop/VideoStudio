@@ -15,7 +15,7 @@ def render(fr, t, dur):
     # разбить на две строки примерно пополам
     half = max(1, (len(words) + 1) // 2)
     lines = [words[:half], words[half:]] if len(words) > 5 else [words]
-    text(fr, t, 0.1, dur - 0.2, '“', W / 2 - 560, H / 2 - 150, fam='serif', size=260, color=(90, 100, 130),
+    text(fr, t, 0.1, dur - 0.2, '“', W / 2 - min(560, W * 0.38), H / 2 - 150, fam='serif', size=260, color=(90, 100, 130),
          shadow=False)
     k = 0
     for li, ws in enumerate(lines):

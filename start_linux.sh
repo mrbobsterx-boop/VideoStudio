@@ -15,4 +15,4 @@ if [ ! -x .venv/bin/python ]; then
     read -n 1 -s -r -p "Нажмите любую клавишу…"; exit 1
   fi
 fi
-.venv/bin/python run.py project
+.venv/bin/python run.py

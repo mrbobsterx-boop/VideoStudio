@@ -34,14 +34,21 @@ MAX_CACHE = 3000          # кадров превью в памяти
 HANG_SECONDS = 40         # столько может считаться один кадр/звук сцены, потом пул перезапускается
 VIDEO_EXT = ('.mp4', '.mov', '.webm', '.mkv', '.m4v', '.avi')
 IMG_EXT = ('.png', '.jpg', '.jpeg', '.webp')
+AUDIO_EXT = ('.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac')
+
+
+def safe_rel(name):
+    """Относительный путь без выходов наверх: 'Папка/файл' -> 'Папка/файл', '../x' -> 'x'."""
+    parts = [p for p in str(name or '').replace('\\', '/').split('/') if p not in ('', '.', '..')]
+    return os.path.join(*parts) if parts else ''
 
 
 # =====================================================================================
 #  shared: scene loading + frame rendering (used in worker processes)
 # =====================================================================================
 _MODS = {}
-_GRAIN = []
-_VIG = None
+_GRAIN = {}
+_VIG = {}
 
 
 def ffmpeg_exe():
@@ -58,8 +65,9 @@ def code_hash(code):
 
 def load_module(path, code):
     """Скомпилировать код сцены в модуль (кэшируется по хэшу кода)."""
+    from . import kit
     h = code_hash(code)
-    key = (path, h)
+    key = (path, h, kit.W, kit.H)       # «from studio.kit import *» копирует W, H — модуль зависит от формата
     m = _MODS.get(key)
     if m is not None:
         return m
@@ -91,7 +99,6 @@ def _call_render(mod, fr, t, dur):
 
 def _post(fr, t, lfi, hits, look):
     """Удары (тряска/вспышка), виньетка, зерно, кинополосы."""
-    global _VIG
     from . import kit
     H, W = fr.shape[:2]
     k = 0.0
@@ -115,20 +122,21 @@ def _post(fr, t, lfi, hits, look):
         fl = np.full_like(fr, (255, 230, 200))
         cv2.addWeighted(fr, 1, fl, 0.35 * k ** 2, 0, dst=fr)
     if look.get('vignette', True):
-        if _VIG is None:
+        vig = _VIG.get((W, H))
+        if vig is None:
             yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
             v = np.sqrt(((xx - W / 2) / (W * 0.62)) ** 2 + ((yy - H / 2) / (kit.VH * 0.75)) ** 2)
             g = (np.clip(1.15 - 0.55 * v ** 2, 0.25, 1) * 255).astype(np.uint8)
-            _VIG = cv2.merge([g] * 3)
-        cv2.multiply(fr, _VIG, dst=fr, scale=1 / 255)
+            vig = _VIG[(W, H)] = cv2.merge([g] * 3)
+        cv2.multiply(fr, vig, dst=fr, scale=1 / 255)
     gr = float(look.get('grain', 0.07))
     if gr > 0:
-        if not _GRAIN:
-            for i in range(6):
-                g = np.clip(128 + np.random.default_rng(i).normal(0, 22, (H, W)), 0, 255).astype(np.uint8)
-                _GRAIN.append(cv2.merge([g] * 3))
-        cv2.addWeighted(fr, 1, _GRAIN[lfi % 6], gr, -128 * gr, dst=fr)
-    if look.get('letterbox', True):
+        grain = _GRAIN.get((W, H))
+        if grain is None:
+            grain = _GRAIN[(W, H)] = [cv2.merge([np.clip(128 + np.random.default_rng(i).normal(0, 22, (H, W)), 0, 255)
+                                                 .astype(np.uint8)] * 3) for i in range(6)]
+        cv2.addWeighted(fr, 1, grain[lfi % 6], gr, -128 * gr, dst=fr)
+    if look.get('letterbox', True) and W > H:
         fr[:kit.VY] = 0
         fr[kit.VY + kit.VH:] = 0
 
@@ -156,6 +164,8 @@ def _error_frame(msg, W=1920, H=1080, title='ОШИБКА В СЦЕНЕ'):
 
 def _setup_kit(task):
     from . import kit
+    if task.get('size'):
+        kit.set_frame(*task['size'])
     kit.TEXTS = dict(task.get('texts') or {})
     kit.USED = set()
     kit.NEW_DEFAULTS = {}
@@ -190,7 +200,7 @@ def render_one(task):
         _post(fr, t, task['lfi'], hits, task['look'])
     except Exception:
         err = _clean_tb(task['path'])
-        fr = _error_frame(err)
+        fr = _error_frame(err, kit.W, kit.H)
     return fr, sorted(kit.USED), dict(kit.NEW_DEFAULTS), err, sorted(kit.ASSETS_USED)
 
 
@@ -213,8 +223,9 @@ def _clean_tb(path):
 
 
 def _jpeg(fr, width=PREVIEW_W, q=84):
-    h = int(width * fr.shape[0] / fr.shape[1])
-    sm = cv2.resize(fr, (width, h), interpolation=cv2.INTER_AREA)
+    """JPEG превью: width — размер по большей стороне (для вертикального кадра — по высоте)."""
+    s = width / max(fr.shape[0], fr.shape[1])
+    sm = cv2.resize(fr, (max(1, int(fr.shape[1] * s)), max(1, int(fr.shape[0] * s))), interpolation=cv2.INTER_AREA)
     ok, buf = cv2.imencode('.jpg', cv2.cvtColor(sm, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, q])
     return buf.tobytes()
 
@@ -281,6 +292,7 @@ def w_check(task):
 def w_chunk(job):
     """Отрендерить кусок кадров в полном качестве и закодировать в отдельный mp4."""
     from . import kit
+    kit.set_frame(*job['size'])
     out = job['out']
     cmd = [job['ffmpeg'], '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
            '-s', '%dx%d' % (kit.W, kit.H), '-r', str(job['fps']), '-i', '-',
@@ -368,6 +380,50 @@ def _level(v):
         return (float(a), float(b))
     except (TypeError, ValueError):
         return None
+
+
+_META = {}
+
+
+def _png_alpha(path):
+    k = ('a', path, os.path.getmtime(path))
+    if k not in _META:
+        try:
+            with open(path, 'rb') as f:
+                head = f.read(26)
+            _META[k] = len(head) > 25 and head[25] in (4, 6)
+        except OSError:
+            _META[k] = False
+    return _META[k]
+
+
+def _img_size(path):
+    k = ('s', path, os.path.getmtime(path))
+    if k not in _META:
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                _META[k] = im.size
+        except Exception:
+            _META[k] = (0, 0)
+    return _META[k]
+
+
+def _audio_dur(ffmpeg, path):
+    """Длина аудиофайла в секундах (из вывода ffmpeg, кэшируется)."""
+    k = ('d', path, os.path.getmtime(path))
+    if k not in _META:
+        d = 0.0
+        try:
+            r = subprocess.run([ffmpeg, '-hide_banner', '-i', path], capture_output=True, text=True, timeout=20,
+                               errors='replace')
+            m = re.search(r'Duration:\s*(\d+):(\d+):([\d.]+)', r.stderr)
+            if m:
+                d = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+        except Exception:
+            pass
+        _META[k] = round(d, 2)
+    return _META[k]
 
 
 def _num(v, d, lo, hi):
@@ -496,6 +552,7 @@ class Studio:
         kit.PROJECT = self.dir
         kit.ASSET_DIRS = [os.path.join(self.dir, 'assets')]
         kit.FONT_DIRS = [os.path.join(self.dir, 'fonts')]
+        kit.set_frame(*self.size)
         n = workers or max(1, min((os.cpu_count() or 2) - 1, 6))
         self.nworkers = n
         self.pool = self._new_pool()
@@ -575,6 +632,7 @@ class Studio:
         p.setdefault('texts', {})
         p.setdefault('fonts', {})
         p.setdefault('scenes', [])
+        p.setdefault('format', '16:9')
         from . import fx, layers
         for s in p['scenes']:
             s['layers'] = [x for x in (layers.clean(L) for L in s.get('layers', [])) if x]
@@ -738,7 +796,8 @@ class Studio:
                                    assets=sorted(self.assets_used.get(s['id'], []))))
             return dict(title=self.p.get('title', 'Project'), fps=fps, total=total, scenes=scenes,
                         texts=dict(self.p['texts']), look=dict(self.p['look']), audio=dict(self.p['audio']),
-                        fonts=self.font_roles(), audio_ver=self.audio_ver, audio_state=self.audio_state,
+                        fonts=self.font_roles(), format=self.p.get('format', '16:9'), size=list(self.size),
+                        audio_ver=self.audio_ver, audio_state=self.audio_state,
                         export={k: v for k, v in self.export_state.items() if k != 'flag'},
                         workers=self.nworkers, dir=self.dir, save_error=self.save_error)
 
@@ -767,7 +826,7 @@ class Studio:
                     lfi=lfi, look=dict(self.p['look']), texts=dict(self.p['texts']),
                     layers=copy.deepcopy(s.get('layers', [])), fx=copy.deepcopy(s.get('fx', [])),
                     fonts=self.font_roles(), asset_dirs=[os.path.join(self.dir, 'assets')],
-                    font_dirs=[os.path.join(self.dir, 'fonts')])
+                    font_dirs=[os.path.join(self.dir, 'fonts')], size=self.size)
 
     def _submit(self, s, lfi):
         sid = s['id']
@@ -816,7 +875,7 @@ class Studio:
         key = ('hung', sid, h[0])
         j = self._virtual.get(key)
         if j is None:
-            j = self._virtual[key] = _jpeg(_error_frame(h[1], title='СЦЕНА ЗАВИСЛА'))
+            j = self._virtual[key] = _jpeg(_error_frame(h[1], *self.size, title='СЦЕНА ЗАВИСЛА'))
         return j
 
     def frame_sl(self, sid, lfi, wait=True):
@@ -960,7 +1019,7 @@ class Studio:
         with self.lock:
             return dict(look=dict(self.p['look']), texts=dict(self.p['texts']), fonts=self.font_roles(),
                         asset_dirs=[os.path.join(self.dir, 'assets')], font_dirs=[os.path.join(self.dir, 'fonts')],
-                        layers=[], fx=[])
+                        layers=[], fx=[], size=self.size)
 
     # ------------------------------------------------------------------ edits
     def _backup(self, s):
@@ -1167,17 +1226,29 @@ class Studio:
             if 'music_file' in audio:
                 fn = audio['music_file']
                 if fn:
-                    fn = os.path.basename(str(fn))
-                    if not os.path.isfile(os.path.join(self.dir, 'audio', fn)):
+                    fn = safe_rel(fn).replace(os.sep, '/')
+                    if not self.music_path(fn):
                         raise ValueError('Файл музыки не найден: %s' % fn)
                 A['music_file'] = fn or None
         self._audio_dirty.set()
         self.save()
 
-    def set_project(self, title=None, fps=None):
+    @property
+    def size(self):
+        from . import kit
+        return kit.FORMATS.get(self.p.get('format', '16:9'), (1920, 1080))
+
+    def set_project(self, title=None, fps=None, fmt=None):
+        from . import kit
         with self.lock:
             if title is not None:
                 self.p['title'] = str(title)[:80]
+            if fmt is not None and fmt in kit.FORMATS and fmt != self.p.get('format', '16:9'):
+                self.p['format'] = fmt
+                kit.set_frame(*self.size)
+                self.cache.clear()
+                self._virtual.clear()
+                self.invalidate()
             if fps is not None and int(fps) in (24, 25, 30, 50, 60) and int(fps) != self.p['fps']:
                 self.p['fps'] = int(fps)
                 self.cache.clear()
@@ -1237,8 +1308,8 @@ class Studio:
         fn = a.get('music_file')
         if not fn:
             return None
-        path = os.path.join(self.dir, 'audio', os.path.basename(fn))
-        if not os.path.isfile(path):
+        path = self.music_path(fn)
+        if not path:
             return None
         m = self.music_samples(path)
         off = int(float(a.get('music_offset', 0)) * SR)
@@ -1379,6 +1450,8 @@ class Studio:
         from scipy.io import wavfile
         while self.running:
             self._audio_dirty.wait()
+            if not self.running:
+                break
             time.sleep(0.4)
             self._audio_dirty.clear()
             if self.export_state.get('state') == 'running':
@@ -1412,6 +1485,8 @@ class Studio:
                 self.audio_ver += 1
                 self.audio_state = 'ready'
             except Exception:
+                if not self.running:          # проект закрыли во время сведения — это не ошибка
+                    break
                 traceback.print_exc()
                 self.audio_state = 'error: ' + traceback.format_exc().splitlines()[-1]
 
@@ -1420,15 +1495,79 @@ class Studio:
 
     # ------------------------------------------------------------------ assets
     def asset_path(self, name, exts=IMG_EXT + VIDEO_EXT):
-        name = os.path.basename(str(name or ''))
-        if not name:
+        """Файл из assets/ по имени без расширения; можно с папкой: 'Лето/пляж'."""
+        rel = safe_rel(name)
+        if not rel:
             return None
         d = os.path.join(self.dir, 'assets')
         for ext in ('',) + tuple(exts):
-            p = os.path.join(d, name + ext)
+            p = os.path.join(d, rel + ext)
             if os.path.isfile(p):
                 return p
         return None
+
+    def list_media(self):
+        """Все картинки, видео и звуки проекта. Папки внутри assets/ — это «папки» в интерфейсе.
+        name — как писать в коде (image/video/a.clip), folder — папка, ref — для музыки ролика."""
+        from . import media
+        out = []
+        root = os.path.join(self.dir, 'assets')
+        if os.path.isdir(root):
+            for dp, dns, fns in os.walk(root):
+                dns[:] = sorted(x for x in dns if not x.startswith('.'))
+                rel_dir = os.path.relpath(dp, root)
+                rel_dir = '' if rel_dir == '.' else rel_dir.replace(os.sep, '/')
+                if rel_dir.count('/') > 2:
+                    continue
+                for f in sorted(fns):
+                    stem, ext = os.path.splitext(f)
+                    ext = ext.lower()
+                    path = os.path.join(dp, f)
+                    name = (rel_dir + '/' + stem) if rel_dir else stem
+                    it = dict(name=name, file=f, folder=rel_dir, mtime=os.path.getmtime(path), size=os.path.getsize(path))
+                    if ext in IMG_EXT:
+                        alpha = ext == '.png' and _png_alpha(path)
+                        w, h = _img_size(path)
+                        it.update(kind='sprite' if alpha else 'image', alpha=alpha, w=w, h=h)
+                    elif ext in VIDEO_EXT:
+                        try:
+                            i = media.info(path)
+                        except Exception:
+                            i = dict(dur=0, w=0, h=0)
+                        it.update(kind='video', dur=i['dur'], w=i['w'], h=i['h'])
+                    elif ext in AUDIO_EXT:
+                        it.update(kind='audio', dur=_audio_dur(self.ffmpeg, path),
+                                  ref='assets/' + (rel_dir + '/' if rel_dir else '') + f)
+                    else:
+                        continue
+                    out.append(it)
+        adir = os.path.join(self.dir, 'audio')
+        if os.path.isdir(adir):
+            for f in sorted(os.listdir(adir)):
+                stem, ext = os.path.splitext(f)
+                path = os.path.join(adir, f)
+                if ext.lower() in AUDIO_EXT and os.path.isfile(path):
+                    out.append(dict(name=stem, file=f, folder='', kind='audio', ref=f, mtime=os.path.getmtime(path),
+                                    size=os.path.getsize(path), dur=_audio_dur(self.ffmpeg, path)))
+        music = self.p['audio'].get('music_file')
+        for it in out:
+            if it['kind'] == 'audio':
+                it['is_music'] = bool(music) and it['ref'] == music
+        return out
+
+    def music_path(self, ref):
+        """Музыка ролика: 'трек.mp3' (папка audio/) или 'assets/Папка/трек.mp3'."""
+        rel = safe_rel(ref)
+        if not rel:
+            return None
+        parts = rel.split(os.sep)
+        if len(parts) == 1:
+            p = os.path.join(self.dir, 'audio', rel)
+        elif parts[0] in ('audio', 'assets'):
+            p = os.path.join(self.dir, rel)
+        else:
+            return None
+        return p if os.path.isfile(p) and p.lower().endswith(AUDIO_EXT) else None
 
     # ------------------------------------------------------------------ export
     def export(self, crf=18):
@@ -1493,7 +1632,7 @@ class Studio:
                 part = frames[a:a + chunk]
                 need = {f['sid'] for f in part}
                 jobs.append(dict(out=os.path.join(tmpd, 'seg%05d.mp4' % ci), frames=part, fps=fps, ffmpeg=self.ffmpeg,
-                                 crf=crf, look=look, texts=texts, fonts=fonts, cancel_flag=st['flag'],
+                                 crf=crf, look=look, texts=texts, fonts=fonts, cancel_flag=st['flag'], size=self.size,
                                  scenes={k: v for k, v in scenes.items() if k in need}))
             st['msg'] = 'Рендер кадров…'
             futs = [self.submit(w_chunk, j, 'export') for j in jobs]
@@ -1552,6 +1691,7 @@ class Studio:
 
     def shutdown(self):
         self.running = False
+        self._audio_dirty.set()             # разбудить поток звука, чтобы он завершился
         with self.lock:
             pending = self._save_timer is not None
         if pending:

@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import cv2
 import numpy as np
 
-from . import ai, automontage, engine, fx, library, media, versions
+from . import ai, automontage, engine, fx, library, media, projects, versions
 from .engine import Studio
 
 UI = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ui')
@@ -37,6 +37,27 @@ S = None          # Studio
 TOKEN = secrets.token_urlsafe(24)
 PORT = 0
 _THUMBS = {}
+_SWITCH = threading.Lock()
+
+
+def switch_project(path):
+    """Открыть другой проект без перезапуска программы."""
+    global S
+    with _SWITCH:
+        old = S
+        if old is not None and os.path.abspath(old.dir) == os.path.abspath(path):
+            return
+        if old is not None:
+            if old.export_state.get('state') == 'running':
+                raise ValueError('Сейчас идёт экспорт — дождитесь его окончания')
+            old.save(now=True)
+            projects.save_cover(old)
+        new = Studio(path, workers=old.nworkers if old else None)
+        S = new
+        _THUMBS.clear()
+        projects.remember(path)
+        if old is not None:
+            old.shutdown()
 
 
 def safe_name(name, exts):
@@ -49,6 +70,23 @@ def safe_name(name, exts):
     if ext not in exts:
         raise ValueError('Неподдерживаемый формат: %s' % (ext or 'без расширения'))
     return stem[:80] + ext
+
+
+def safe_folder(name):
+    """Имя папки внутри «Медиа»: одна папка, без опасных символов."""
+    name = os.path.basename(unquote(str(name or '')).replace('\\', '/').strip('/'))
+    name = re.sub(r'[^\w\- ]+', '_', name, flags=re.UNICODE).strip(' _.')
+    if name.lower() in WIN_RESERVED:
+        name += '_'
+    return name[:60]
+
+
+def _image_ok(path):
+    # np.fromfile + imdecode: cv2.imread не открывает файлы с русскими буквами в пути на Windows
+    try:
+        return cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_UNCHANGED) is not None or path.lower().endswith('.webp')
+    except Exception:
+        return False
 
 
 def key_white(a, tol=18, feather=1.2):
@@ -276,6 +314,8 @@ class H(BaseHTTPRequestHandler):
             if p == '/api/media':
                 path = S.asset_path(q.get('name', ''))
                 return self.file(path)
+            if p == '/api/audiofile':
+                return self.file(S.music_path(q.get('ref', '')))
             if p == '/api/fonts':
                 return self.js(self.list_fonts())
             if p == '/api/font/sample':
@@ -291,6 +331,12 @@ class H(BaseHTTPRequestHandler):
             if p == '/api/library/code':
                 m = library.load(q['id'])
                 return self.js(dict(code=m['code'], name=m.get('name'), desc=m.get('desc'), dur=m.get('dur')))
+            if p == '/api/projects':
+                projects.save_cover(S)
+                return self.js(dict(items=projects.list_projects(S.dir)))
+            if p == '/api/projects/cover':
+                d = projects.resolve(q.get('id', ''), S.dir)
+                return self.file(os.path.join(d, '.cache', 'cover.jpg'), 'image/jpeg')
             if p == '/api/versions':
                 return self.js(dict(items=versions.list_versions(S)))
             if p == '/api/automontage/info':
@@ -350,7 +396,7 @@ class H(BaseHTTPRequestHandler):
                 return self.js(dict(ok=True))
             if p == '/api/project':
                 b = self.jbody()
-                S.set_project(b.get('title'), b.get('fps'))
+                S.set_project(b.get('title'), b.get('fps'), b.get('format'))
                 return self.js(dict(ok=True))
             if p == '/api/fonts':
                 S.set_fonts(self.jbody())
@@ -404,6 +450,20 @@ class H(BaseHTTPRequestHandler):
             if p == '/api/library/delete':
                 library.delete(self.jbody()['id'])
                 return self.js(dict(ok=True))
+            # ---- проекты
+            if p == '/api/projects/new':
+                b = self.jbody()
+                d = projects.create(b.get('title'), b.get('format', '16:9'), fonts_from=S.dir)
+                switch_project(d)
+                return self.js(dict(ok=True, id=projects._pid(d)))
+            if p == '/api/projects/open':
+                switch_project(projects.resolve(self.jbody().get('id', ''), S.dir))
+                return self.js(dict(ok=True))
+            if p == '/api/projects/duplicate':
+                S.save(now=True)
+                d = projects.duplicate(S.dir, self.jbody().get('title'))
+                switch_project(d)
+                return self.js(dict(ok=True, id=projects._pid(d)))
             # ---- версии
             if p == '/api/versions/create':
                 return self.js(dict(ok=True, version=versions.create(S, self.jbody().get('name', ''))))
@@ -455,7 +515,15 @@ class H(BaseHTTPRequestHandler):
     def upload_asset(self, q):
         raw_name = q.get('name') or ''
         ext = os.path.splitext(raw_name)[1].lower()
-        d = os.path.join(S.dir, 'assets')
+        folder = safe_folder(q.get('folder'))
+        d = os.path.join(S.dir, 'assets', folder) if folder else os.path.join(S.dir, 'assets')
+        if ext in AUD_EXT:
+            # звук: в папку медиа (если загружали папкой) или в audio/ — музыка ролика
+            name = safe_name(raw_name, AUD_EXT)
+            d = d if folder else os.path.join(S.dir, 'audio')
+            os.makedirs(d, exist_ok=True)
+            self.save_upload(os.path.join(d, name), 1 << 30)
+            return self.js(dict(ok=True, name=((folder + '/') if folder else '') + os.path.splitext(name)[0], kind='audio'))
         os.makedirs(d, exist_ok=True)
         if ext in VID_EXT:
             name = safe_name(raw_name, VID_EXT)
@@ -488,40 +556,22 @@ class H(BaseHTTPRequestHandler):
             else:
                 path = os.path.join(d, name)
                 self.save_upload(path, 256 << 20)
-                if cv2.imread(path, cv2.IMREAD_UNCHANGED) is None and not name.endswith('.webp'):
+                if not _image_ok(path):
                     os.remove(path)
                     raise ValueError('Не удалось прочитать картинку')
-        stem = os.path.splitext(name)[0]
+        stem = ((folder + '/') if folder else '') + os.path.splitext(name)[0]
         _THUMBS.pop(stem, None)
         S.invalidate_asset(stem)
         return self.js(dict(ok=True, name=stem))
 
     def list_assets(self):
-        d = os.path.join(S.dir, 'assets')
-        out = []
-        for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
-            ext = os.path.splitext(f)[1].lower()
-            path = os.path.join(d, f)
-            name = os.path.splitext(f)[0]
-            if ext in IMG_EXT:
-                alpha = f.lower().endswith('.png') and _has_alpha(path)
-                out.append(dict(name=name, file=f, kind='sprite' if alpha else 'image', alpha=alpha,
-                                mtime=os.path.getmtime(path), size=os.path.getsize(path)))
-            elif ext in VID_EXT:
-                try:
-                    i = media.info(path)
-                except Exception:
-                    i = dict(dur=0, w=0, h=0)
-                out.append(dict(name=name, file=f, kind='video', alpha=False, mtime=os.path.getmtime(path),
-                                size=os.path.getsize(path), dur=i['dur'], w=i['w'], h=i['h']))
-        return out
+        return S.list_media()
 
     def thumb(self, name):
         path = S.asset_path(name)
         if not path:
             return self.send(404)
         key = (path, os.path.getmtime(path))
-        name = os.path.basename(name)
         if _THUMBS.get(name, (None,))[0] != key:
             if path.lower().endswith(VID_EXT):
                 im = media.thumbnail(path)
@@ -584,21 +634,6 @@ class H(BaseHTTPRequestHandler):
         return dict(file=m['file'], dur=m['dur'], tempo=m['tempo'], beats=len(m['beats']))
 
 
-_ALPHA = {}
-
-
-def _has_alpha(path):
-    k = (path, os.path.getmtime(path))
-    if k not in _ALPHA:
-        try:
-            with open(path, 'rb') as f:
-                head = f.read(26)
-            _ALPHA[k] = len(head) > 25 and head[25] in (4, 6)
-        except Exception:
-            _ALPHA[k] = False
-    return _ALPHA[k]
-
-
 def open_folder(path, select=None):
     """Открывает папку в проводнике; если задан select — выделяет этот файл.
     Возвращает текст ошибки или None."""
@@ -634,16 +669,20 @@ def free_port(start):
 def main():
     global S, PORT
     ap = argparse.ArgumentParser(description='Shelter Studio')
-    ap.add_argument('project', nargs='?', default=os.path.join(os.getcwd(), 'project'))
+    ap.add_argument('project', nargs='?', default=None,
+                    help='папка проекта (по умолчанию — последний открытый, иначе project/)')
     ap.add_argument('--port', type=int, default=8765)
     ap.add_argument('--workers', type=int, default=0)
     ap.add_argument('--no-browser', action='store_true')
     a = ap.parse_args()
+    if not a.project:
+        a.project = projects.last_project() or os.path.join(projects.ROOT, 'project')
     if not os.path.isfile(os.path.join(a.project, 'project.json')):
         print('Не найден project.json в папке', a.project)
         sys.exit(1)
     print('Загружаю проект…')
     S = Studio(a.project, workers=a.workers or None)
+    projects.remember(a.project)
     PORT = free_port(a.port)
     srv = Server(('127.0.0.1', PORT), H)
     url = 'http://127.0.0.1:%d' % PORT

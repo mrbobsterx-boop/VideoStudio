@@ -98,6 +98,7 @@ function closeModal() {
   if ($('modal').hidden) return;
   $('modal').hidden = true;
   $('modalBody').innerHTML = '';
+  if (window.SX && SX.stopAudioPreview) SX.stopAudioPreview();
   const f = modalClose; modalClose = null;
   if (f) f();
 }
@@ -158,6 +159,7 @@ async function refresh() {
   if (!s || !s.scenes) { $('status').innerHTML = '<b style="color:var(--bad)">Ошибка связи.</b> ' + esc(s && s.error || ''); return; }
   const old = ST;
   ST = s;
+  applyFormat();
   if (!old) init();
   if (document.activeElement !== $('title')) $('title').value = ST.title;
   $('tcTotal').textContent = tc(ST.total);
@@ -195,6 +197,18 @@ function updateStatus() {
 
 // ------------------------------------------------------------------ viewer
 const cv = $('screen'), ctx = cv.getContext('2d');
+let curFmt = null;
+function applyFormat() {
+  const sz = ST.size || [1920, 1080];
+  const key = sz.join('x');
+  if (key === curFmt) return;
+  const first = curFmt === null;
+  curFmt = key;
+  const k = 960 / Math.max(sz[0], sz[1]);
+  cv.width = Math.round(sz[0] * k); cv.height = Math.round(sz[1] * k);
+  cv.style.aspectRatio = `${sz[0]} / ${sz[1]}`;
+  if (!first) { frames.clear(); thumbs.clear(); painted = null; lastSig = ''; }
+}
 let paintTok = 0;
 async function paint(blob, key) {
   const tok = ++paintTok;
@@ -811,6 +825,7 @@ function updateSettings() {
   setv('auFade', A.fade_out ?? 1.5);
   $('musicName').textContent = A.music_file || 'нет';
   setv('fps', ST.fps);
+  setv('fmt', ST.format || '16:9');
   $('projDir').textContent = ST.dir;
   if (!settingsInit) {
     settingsInit = true;
@@ -837,6 +852,11 @@ function updateSettings() {
       refresh();
     };
     $('musicRemove').onclick = () => aud('music_file', null);
+    $('fmt').onchange = async e => {
+      if (!confirm('Сменить формат кадра? Все сцены пересчитаются. Сцены, написанные кодом под другой формат, может понадобиться подправить (слои и эффекты подстроятся сами).')) { e.target.value = ST.format; return; }
+      await api.post('/api/project', { format: e.target.value }); await refresh(); show(cur, true);
+      toast('Формат изменён. Превью пересчитывается…');
+    };
     $('fps').onchange = async e => { await api.post('/api/project', { fps: +e.target.value }); frames.clear(); pxs = 0; lastSig = ''; await refresh(); };
     document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => api.post('/api/open', { what: b.dataset.open }).then(r => {
       toast(r.error ? 'Не удалось открыть папку: ' + esc(r.error) : 'Папка открыта (окно может быть позади браузера):<div class="path">' + esc(r.path) + '</div>');

@@ -429,3 +429,42 @@ textarea.mfield { resize: vertical; min-height: 90px; line-height: 1.5; }
   .panel { height: 600px; }
   .mgrid { grid-template-columns: 1fr; }
 }
+
+/* projects */
+.lcard2.proj.cur { border-color: var(--accent-line); cursor: default; }
+.lcard2 .lth { position: relative; }
+.lcard2 .nocover { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); background: linear-gradient(135deg, #14171d, #0c0e12); }
+.lcard2 .nocover .ic { width: 34px; height: 34px; stroke-width: 1.2; }
+.lcard2 .curtag { color: var(--accent); font-weight: 500; display: inline; }
+.lcard2 .ppath { font: 10.5px var(--mono); color: var(--faint); }
+
+/* media picker */
+.mpicker { display: flex; flex-direction: column; min-height: 0; }
+.mp-bar { padding: 0 14px 10px; display: flex; flex-direction: column; gap: 8px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line-2); color: var(--text-2);
+  padding: 4px 10px; border-radius: 99px; font-size: 12px; }
+.chip .ic { width: 13px; height: 13px; color: var(--muted); }
+.chip:hover { border-color: var(--line-3); color: var(--text); }
+.chip.on { background: var(--accent-soft); border-color: var(--accent-line); color: #e3e7ff; }
+.chip.on .ic { color: var(--accent); }
+.mp-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mp-row .search { flex: 1; min-width: 140px; padding: 5px 9px; }
+.seg-tabs.flat { margin: 0; }
+.seg-tabs button i { font-style: normal; color: var(--faint); font-size: 11px; margin-left: 2px; }
+.mp-sel { font-size: 12px; color: var(--muted); }
+.mp-sel b { color: var(--accent); }
+.mtile .tick { position: absolute; top: 10px; left: 10px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(0,0,0,.55); border: 1.5px solid rgba(255,255,255,.35); color: transparent; }
+.mtile .tick .ic { width: 12px; height: 12px; stroke-width: 2.6; }
+.mtile.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.mtile.on .tick { background: var(--accent); border-color: var(--accent); color: #0b0c12; }
+.mtile .th.audio { background: linear-gradient(135deg, #1b2033, #221a33); color: var(--accent); position: relative; }
+.mtile .th.audio > .ic { width: 30px; height: 30px; stroke-width: 1.3; opacity: .8; }
+.playbtn { position: absolute; right: 7px; bottom: 7px; width: 28px; height: 28px; border-radius: 50%; border: 0; display: grid; place-items: center;
+  background: rgba(255,255,255,.9); color: #0b0c10; }
+.playbtn .ic { width: 13px; height: 13px; }
+.playbtn.on { background: var(--accent); }
+.musictag { position: absolute; top: 10px; right: 10px; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--accent); color: #0b0c12; font-weight: 600; }
+.modal .mpicker .mp-bar { padding: 0 0 10px; }
+.modal .mpicker .asset-grid { padding: 2px 0 6px; max-height: 360px; overflow: auto; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }

@@ -32,8 +32,20 @@ __all__ = [
     'dust', 'embers', 'card', 'diamond',
 ]
 
-W, H = 1920, 1080
-VY, VH = 138, 804            # кинополосы 2.39:1
+W, H = 1920, 1080             # размер кадра (меняется форматом проекта: 16:9, 9:16, 1:1)
+VY, VH = 138, 804            # кинополосы 2.39:1 (для вертикального и квадратного — весь кадр)
+FORMATS = {'16:9': (1920, 1080), '9:16': (1080, 1920), '1:1': (1080, 1080)}
+
+
+def set_frame(w, h):
+    """Задать размер кадра (вызывает движок перед рендером)."""
+    global W, H, VY, VH
+    W, H = int(w), int(h)
+    if W > H:
+        VH = int(round(W / 2.39)) + 1
+        VY = (H - VH) // 2
+    else:
+        VY, VH = 0, H
 
 CREAM = (236, 228, 214)
 EMBER = (235, 125, 45)
@@ -217,6 +229,16 @@ def _tlayer(s, fam, w, size, color, track, shadow):
     return a
 
 
+def fit_text(s, fam, w, size, color, track, shadow, maxw=None):
+    """Слой текста; если строка шире кадра (например, в вертикальном 9:16) — уменьшить шрифт, чтобы влезла."""
+    a = _tlayer(s, fam, w, int(size), color, track, shadow)
+    lim = (maxw or W * 0.92)
+    tw = a.shape[1] - 80
+    if tw > lim and size > 12:
+        a = _tlayer(s, fam, w, max(10, int(size * lim / tw)), color, track, shadow)
+    return a
+
+
 def text_size(s, fam='text', w=400, size=60, track=0.0):
     """Ширина и высота строки в пикселях."""
     f = _font(fam, w, size)
@@ -250,7 +272,7 @@ def text(fr, t, t0, t1, s, cx, cy, align='c', rise=18, blur=True, fin=0.6, fout=
     Возвращает (x, y, ширина, высота) надписи или None, если она не видна."""
     if t < t0 or t > t1 or not s:
         return None
-    a = _tlayer(s, fam, w, int(size), tuple(color), track, shadow)
+    a = fit_text(s, fam, w, int(size), tuple(color), track, shadow)
     ei = oc(prog(t, t0, t0 + fin)) if fin > 0 else 1.0
     eo = prog(t, t1 - fout, t1) if fout > 0 else 0.0
     op = ei * (1 - eo)
@@ -267,16 +289,20 @@ def text(fr, t, t0, t1, s, cx, cy, align='c', rise=18, blur=True, fin=0.6, fout=
     return (x + 40, y + 40, wd - 80, h - 80)
 
 
-def serif(fr, t, t0, t1, s, cy=VY + VH - 120, size=68, cx=W / 2, **k):
+def serif(fr, t, t0, t1, s, cy=None, size=68, cx=None, **k):
     """Курсивная кинематографичная строка (по умолчанию — внизу кадра, как субтитр)."""
     k.setdefault('color', CREAM)
     k.setdefault('fam', 'serif')
+    cy = VY + VH - 120 if cy is None else cy
+    cx = W / 2 if cx is None else cx
     return text(fr, t, t0, t1, s, cx, cy, w=500, size=size, track=0.01, **k)
 
 
-def bold(fr, t, t0, t1, s, cy=H / 2, size=150, cx=W / 2, color=CREAM, track=0.08, **k):
+def bold(fr, t, t0, t1, s, cy=None, size=150, cx=None, color=CREAM, track=0.08, **k):
     """Крупный жирный заголовок."""
     k.setdefault('fam', 'title')
+    cy = H / 2 if cy is None else cy
+    cx = W / 2 if cx is None else cx
     return text(fr, t, t0, t1, s, cx, cy, w=700, size=size, color=color, track=track, **k)
 
 
@@ -512,6 +538,7 @@ _GLOW = {}
 
 def _glow(key, draw, sigma):
     """Мягкое пятно света: рисуется в 1/4 размера и растягивается — в десятки раз быстрее."""
+    key = key + (W, H)
     g = _GLOW.get(key)
     if g is None:
         q = 4
