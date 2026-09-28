@@ -1,0 +1,185 @@
+{
+  "title": "SHELTER trailer",
+  "fps": 30,
+  "look": {
+    "letterbox": true,
+    "vignette": true,
+    "grain": 0.07,
+    "hits": true
+  },
+  "audio": {
+    "generated": true,
+    "generated_volume": 1.0,
+    "music_file": null,
+    "music_volume": 0.8,
+    "music_offset": 0,
+    "fade_out": 1.5
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "file": "intro.py",
+      "name": "Intro",
+      "dur": 3.2
+    },
+    {
+      "id": "s02",
+      "file": "it_didnt.py",
+      "name": "It didn't",
+      "dur": 3.4
+    },
+    {
+      "id": "s03",
+      "file": "homes.py",
+      "name": "Homes",
+      "dur": 3.4
+    },
+    {
+      "id": "s04",
+      "file": "alex.py",
+      "name": "Alex",
+      "dur": 3.6
+    },
+    {
+      "id": "s05",
+      "file": "underground.py",
+      "name": "Underground",
+      "dur": 3.2
+    },
+    {
+      "id": "s06",
+      "file": "new_home.py",
+      "name": "New home",
+      "dur": 3.2
+    },
+    {
+      "id": "s07",
+      "file": "scavenge.py",
+      "name": "Scavenge",
+      "dur": 1.8
+    },
+    {
+      "id": "s08",
+      "file": "craft.py",
+      "name": "Craft",
+      "dur": 1.8
+    },
+    {
+      "id": "s09",
+      "file": "build.py",
+      "name": "Build",
+      "dur": 1.8
+    },
+    {
+      "id": "s10",
+      "file": "survive.py",
+      "name": "Survive",
+      "dur": 1.8
+    },
+    {
+      "id": "s11",
+      "file": "survivors.py",
+      "name": "Survivors",
+      "dur": 3.2
+    },
+    {
+      "id": "s12",
+      "file": "day23.py",
+      "name": "Day 23",
+      "dur": 3.2
+    },
+    {
+      "id": "s13",
+      "file": "map_route.py",
+      "name": "Map",
+      "dur": 4.0
+    },
+    {
+      "id": "s14",
+      "file": "run.py",
+      "name": "Run",
+      "dur": 3.6
+    },
+    {
+      "id": "s15",
+      "file": "losses.py",
+      "name": "Losses",
+      "dur": 3.8
+    },
+    {
+      "id": "s16",
+      "file": "choose_eats.py",
+      "name": "Choose: eats",
+      "dur": 1.3334
+    },
+    {
+      "id": "s17",
+      "file": "choose_goes.py",
+      "name": "Choose: goes",
+      "dur": 1.3334
+    },
+    {
+      "id": "s18",
+      "file": "choose_stays.py",
+      "name": "Choose: stays",
+      "dur": 1.3334
+    },
+    {
+      "id": "s19",
+      "file": "silence.py",
+      "name": "Silence",
+      "dur": 1.0
+    },
+    {
+      "id": "s20",
+      "file": "finale.py",
+      "name": "Finale",
+      "dur": 7.6
+    },
+    {
+      "id": "s21",
+      "file": "logo.py",
+      "name": "Logo",
+      "dur": 5.4
+    }
+  ],
+  "texts": {
+    "intro_line": "At first, they said it would pass.",
+    "it_didnt": "IT DIDN’T.",
+    "homes_line": "We left our homes behind.",
+    "name_1": "ALEX",
+    "alex_role": "Mechanic.  34.",
+    "alex_quote": "“As long as I breathe, nothing is lost.”",
+    "underground_line": "So we went underground.",
+    "home_line": "And built a home from what was left.",
+    "scavenge": "SCAVENGE",
+    "craft": "CRAFT",
+    "build": "BUILD",
+    "survive": "SURVIVE",
+    "survivors_line": "Six survivors. One shelter.",
+    "name_2": "MARIA",
+    "name_3": "IGOR",
+    "name_4": "SVETLANA",
+    "name_5": "DENIS",
+    "name_6": "OLGA",
+    "day_title": "DAY 23",
+    "stat_1": "SURVIVORS",
+    "stat_2": "FOOD",
+    "stat_3": "WATER",
+    "stat_4": "POWER",
+    "stat_5": "MEDICINE",
+    "map_line": "The hospital. Medicine. High danger.",
+    "map_call": "SOMEONE HAS TO GO.",
+    "run_objective": "Reach the radio tower",
+    "run_line": "Out there, every mistake is final.",
+    "status_wounded": "WOUNDED",
+    "status_starving": "STARVING",
+    "loss_line": "{name_5|title} didn’t come back.",
+    "choose_1": "CHOOSE WHO EATS.",
+    "choose_2": "CHOOSE WHO GOES.",
+    "choose_3": "CHOOSE WHO STAYS.",
+    "finale_1": "People don’t survive because the world is kind.",
+    "finale_2": "They survive because they refuse to give up.",
+    "coming_soon": "COMING SOON"
+  }
+}
