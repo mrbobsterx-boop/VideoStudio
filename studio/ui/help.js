@@ -1,0 +1,90 @@
+window.HELP_HTML = `
+<h3>Как устроена сцена</h3>
+<p>Каждый блок на таймлайне — отдельный файл <code>scenes/имя.py</code>. В нём две функции:</p>
+<pre>from studio.kit import *
+
+HITS = [0.0]            # удары: тряска + вспышка (секунды от начала сцены)
+AMBIENCE = (0.5, 0.6)   # фоновый гул в начале и в конце сцены (0..1), None — как в прошлой
+WIND = (0.1, 0.1)       # ветер
+
+def render(fr, t, dur):
+    # fr — кадр 1920×1080, t — секунды от начала сцены, dur — длина сцены
+    darkbg(fr)
+    bold(fr, t, 0.2, dur, tx('my_title', 'HELLO'))
+
+def sound(a, dur):
+    a.braam(0, 0.8)</pre>
+<p><b>render</b> вызывается для каждого кадра. Время <code>t</code> идёт от 0 до <code>dur</code>.
+Удобно считать долю сцены: <code>u = t / dur</code> (от 0 до 1).</p>
+
+<h3>Время и плавность</h3>
+<table>
+<tr><td>prog(t, a, b)</td><td>0 до секунды a, 1 после b, плавный рост между ними</td></tr>
+<tr><td>lerp(a, b, k)</td><td>значение между a и b (k от 0 до 1)</td></tr>
+<tr><td>oc(k) ioc(k) oexp(k)</td><td>плавности: замедление в конце, в начале и в конце, резкий старт</td></tr>
+<tr><td>oback(k) obounce(k)</td><td>с перелётом, с отскоком</td></tr>
+</table>
+<pre>x = lerp(-300, 960, oc(prog(t, 0.2, 1.0)))   # выезд слева за 0.8 с</pre>
+
+<h3>Тексты</h3>
+<table>
+<tr><td>tx('ключ', 'текст')</td><td>текст из вкладки «Тексты» (появится там сам)</td></tr>
+<tr><td>bold(fr, t, t0, t1, s, cy=, size=)</td><td>крупный заголовок, виден с t0 до t1</td></tr>
+<tr><td>serif(fr, t, t0, t1, s, cy=, size=)</td><td>курсивная строка, по умолчанию внизу как субтитр</td></tr>
+<tr><td>text(fr, t, t0, t1, s, x, y, align='l'|'c'|'r', size=, w=, color=, track=, fam=)</td><td>любой текст: w — толщина 200..700, track — разрядка, fam — 'oswald' или 'corm_i'</td></tr>
+</table>
+<pre>bold(fr, t, 0.3, dur - 0.2, tx('chapter', 'CHAPTER II'), size=160, track=0.3)
+serif(fr, t, 1.0, dur, tx('line', 'The winter came early.'))</pre>
+<p>Параметры появления у <code>text / bold / serif</code>: <code>fin</code> и <code>fout</code> — длительность проявления и исчезновения,
+<code>rise</code> — насколько текст «всплывает», <code>blur=False</code> — без размытия.</p>
+
+<h3>Картинки</h3>
+<table>
+<tr><td>image('имя', sat=, con=, bright=, tint=, blur=)</td><td>фон из assets/ с цветокоррекцией</td></tr>
+<tr><td>kb(fr, img, cx, cy, w)</td><td>«камера»: показать участок картинки с центром (cx, cy) шириной w. Меняйте во времени — наезд/панорама</td></tr>
+<tr><td>sprite('имя')</td><td>картинка с прозрачностью</td></tr>
+<tr><td>place(fr, spr, x, y, sc, ang, op)</td><td>поставить спрайт центром в (x, y): масштаб, поворот, прозрачность</td></tr>
+<tr><td>portrait('имя', w, h)</td><td>увеличить маленькую картинку с резкостью</td></tr>
+<tr><td>blit(fr, img, x, y, op)</td><td>наложить картинку левым верхним углом</td></tr>
+</table>
+<pre>u = t / dur
+kb(fr, image('street', bright=0.8), lerp(900, 1100, ioc(u)), 420, lerp(1500, 1200, u))
+place(fr, sprite('p_car_ok'), 960, 700, 2.0, op=prog(t, 0.5, 1.0))</pre>
+
+<h3>Эффекты кадра</h3>
+<table>
+<tr><td>darkbg(fr, цвет)</td><td>тёмный фон</td></tr>
+<tr><td>dim(fr, k)</td><td>затемнить (0 — чёрный). Появление из темноты: <code>dim(fr, prog(t, 0, 0.5))</code></td></tr>
+<tr><td>blur(fr, 6)</td><td>размыть кадр</td></tr>
+<tr><td>grayscale(fr, k)</td><td>обесцветить</td></tr>
+<tr><td>dust(fr, t) embers(fr, t)</td><td>пыль, искры</td></tr>
+<tr><td>glow_circle(fr, x, y, r, цвет)</td><td>мягкое свечение</td></tr>
+<tr><td>shade_bottom(fr)</td><td>затемнить низ под субтитры</td></tr>
+</table>
+<p>Размеры: <code>W, H</code> = 1920, 1080. Видимая область между полосами: от <code>VY</code> до <code>VY + VH</code>.
+Цвета: <code>CREAM, EMBER, RED, WHITE, BLACK</code> или любые <code>(R, G, B)</code>.
+Можно пользоваться <code>np</code>, <code>cv2</code> и <code>math</code> напрямую.</p>
+
+<h3>Звук — функция sound(a, dur)</h3>
+<table>
+<tr><td>a.braam(t, g)</td><td>тяжёлый трейлерный удар</td></tr>
+<tr><td>a.taiko(t, g)</td><td>барабан</td></tr>
+<tr><td>a.war_drums(t0, t1)</td><td>боевой ритм</td></tr>
+<tr><td>a.piano(t, 'D4', g)</td><td>нота фортепиано</td></tr>
+<tr><td>a.melody(t, ['D4','F4','A4'], step=0.5)</td><td>мелодия</td></tr>
+<tr><td>a.pad(t, ['D3','F3','A3'], dur, g)</td><td>аккорд-подложка</td></tr>
+<tr><td>a.riser(t, d, g)</td><td>нарастание к удару (закончится в t + d)</td></tr>
+<tr><td>a.pulse(t0, t1, g) a.ticks(t0, t1)</td><td>тревожный бас, тиканье</td></tr>
+<tr><td>a.heart(t) a.whoosh(t) a.tick(t)</td><td>сердце, свист, щелчок</td></tr>
+</table>
+<p>Свою музыку можно загрузить во вкладке «Настройки».</p>
+
+<h3>Горячие клавиши</h3>
+<table>
+<tr><td>Пробел</td><td>воспроизведение / пауза (когда курсор не в редакторе)</td></tr>
+<tr><td>← →</td><td>кадр назад / вперёд (Shift — на секунду)</td></tr>
+<tr><td>Ctrl/Cmd + S</td><td>сохранить сцену</td></tr>
+<tr><td>Ctrl/Cmd + /</td><td>закомментировать строку</td></tr>
+<tr><td>Ctrl + колесо</td><td>масштаб таймлайна</td></tr>
+</table>
+`;

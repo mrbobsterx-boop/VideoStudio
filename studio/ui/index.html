@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shelter Studio</title>
+<link rel="stylesheet" href="/ui/vendor/codemirror/codemirror.css">
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark"></span>Shelter Studio</div>
+  <input id="title" class="title-input" spellcheck="false" aria-label="Название проекта">
+  <div class="status" id="status"></div>
+  <div class="export-box">
+    <div id="exportProgress" class="xprog" hidden>
+      <div class="xbar"><i id="xfill"></i></div>
+      <span id="xtext"></span>
+      <button class="ghost small" id="xcancel">Отмена</button>
+    </div>
+    <button id="exportBtn" class="primary">Экспорт MP4</button>
+  </div>
+</header>
+
+<main class="work">
+  <section class="viewer">
+    <div class="screen-wrap">
+      <canvas id="screen" width="960" height="540"></canvas>
+      <div id="buffering" class="buffering" hidden>Рендер кадров…</div>
+    </div>
+    <div class="transport">
+      <button class="icon" id="bStart" title="В начало (Home)">⏮</button>
+      <button class="icon" id="bPrev" title="Кадр назад (←)">◂</button>
+      <button class="icon play" id="bPlay" title="Воспроизвести (Пробел)">▶</button>
+      <button class="icon" id="bNext" title="Кадр вперёд (→)">▸</button>
+      <button class="icon" id="bEnd" title="В конец (End)">⏭</button>
+      <div class="tc"><b id="tcCur">00:00:00</b><span> / </span><span id="tcTotal">00:00:00</span></div>
+      <div class="scene-now" id="sceneNow"></div>
+      <label class="chk"><input type="checkbox" id="loop" checked> Повтор</label>
+      <label class="vol" title="Громкость превью">🔈<input type="range" id="vol" min="0" max="1" step="0.05" value="0.8"></label>
+    </div>
+  </section>
+
+  <section class="panel">
+    <nav class="tabs" role="tablist">
+      <button data-tab="code" class="on">Код сцены</button>
+      <button data-tab="texts">Тексты</button>
+      <button data-tab="assets">Картинки</button>
+      <button data-tab="settings">Настройки</button>
+      <button data-tab="help">Шпаргалка</button>
+    </nav>
+
+    <div class="tab on" id="tab-code">
+      <div class="inspector">
+        <label>Сцена <input id="scName" spellcheck="false"></label>
+        <label class="dur">Длина, с <input id="scDur" type="number" step="0.1" min="0.2"></label>
+        <span class="file" id="scFile"></span>
+      </div>
+      <div class="editor-wrap"><div id="editor"></div></div>
+      <div class="code-bar">
+        <label class="chk"><input type="checkbox" id="autoSave" checked> Обновлять превью при наборе</label>
+        <span id="saveState" class="save-state"></span>
+        <button id="saveBtn" class="secondary">Сохранить <kbd>Ctrl S</kbd></button>
+      </div>
+      <pre id="errBox" class="err" hidden></pre>
+    </div>
+
+    <div class="tab" id="tab-texts">
+      <div class="texts-head">
+        <input id="textSearch" placeholder="Найти текст или ключ…" spellcheck="false">
+      </div>
+      <p class="hint">Все надписи ролика. Поменяйте текст — сцены с ним перерисуются сами.
+        Чтобы вставить другой текст внутрь строки: <code>{name_5}</code>, <code>{name_5|title}</code>.</p>
+      <div id="textsList"></div>
+    </div>
+
+    <div class="tab" id="tab-assets">
+      <div class="assets-head">
+        <label class="secondary filebtn">Добавить картинки<input type="file" id="assetFile" accept="image/*" multiple hidden></label>
+        <label class="chk"><input type="checkbox" id="cutout"> Убрать белый фон</label>
+        <button class="ghost small" id="openAssets">Открыть папку</button>
+      </div>
+      <p class="hint">Нажмите на картинку — в код вставится <code>image('имя')</code> для фона
+        или <code>sprite('имя')</code> для вырезанного объекта. Можно перетащить файлы прямо сюда.</p>
+      <div id="assetGrid" class="asset-grid"></div>
+    </div>
+
+    <div class="tab" id="tab-settings">
+      <div class="set-group">
+        <h3>Проект</h3>
+        <label class="row">Кадров в секунду
+          <select id="fps"><option>24</option><option>25</option><option>30</option><option>50</option><option>60</option></select></label>
+      </div>
+      <div class="set-group">
+        <h3>Картинка</h3>
+        <label class="row chk"><input type="checkbox" id="lkLetter"> Кинополосы сверху и снизу</label>
+        <label class="row chk"><input type="checkbox" id="lkVig"> Виньетка</label>
+        <label class="row chk"><input type="checkbox" id="lkHits"> Тряска и вспышка на ударах (HITS)</label>
+        <label class="row">Зерно плёнки <input type="range" id="lkGrain" min="0" max="0.2" step="0.01"><span id="lkGrainV"></span></label>
+      </div>
+      <div class="set-group">
+        <h3>Звук</h3>
+        <label class="row chk"><input type="checkbox" id="auGen"> Сгенерированный саундтрек (из функций sound() в сценах)</label>
+        <label class="row">Его громкость <input type="range" id="auGenVol" min="0" max="1.5" step="0.05"><span id="auGenVolV"></span></label>
+        <div class="row">Своя музыка:
+          <span id="musicName" class="muted">нет</span>
+          <label class="secondary small filebtn">Загрузить…<input type="file" id="musicFile" accept="audio/*" hidden></label>
+          <button class="ghost small" id="musicRemove">Убрать</button>
+        </div>
+        <label class="row">Громкость музыки <input type="range" id="auMusVol" min="0" max="1.5" step="0.05"><span id="auMusVolV"></span></label>
+        <label class="row">Сдвиг музыки, с <input type="number" id="auMusOff" step="0.1"></label>
+        <label class="row">Затухание в конце, с <input type="number" id="auFade" step="0.1" min="0"></label>
+      </div>
+      <div class="set-group">
+        <h3>Папки</h3>
+        <div class="row"><button class="ghost small" data-open="scenes">Сцены</button>
+          <button class="ghost small" data-open="assets">Картинки</button>
+          <button class="ghost small" data-open="exports">Готовые видео</button></div>
+        <p class="muted small" id="projDir"></p>
+      </div>
+    </div>
+
+    <div class="tab" id="tab-help"><div class="help" id="helpBody"></div></div>
+  </section>
+</main>
+
+<section class="timeline">
+  <div class="tl-bar">
+    <div class="add-wrap">
+      <button id="addBtn" class="secondary small">+ Сцена</button>
+      <div id="addMenu" class="menu" hidden>
+        <label>Название <input id="newName" value="New scene" spellcheck="false"></label>
+        <button data-tpl="title">Титр — крупная надпись</button>
+        <button data-tpl="image">Картинка + движение камеры</button>
+        <button data-tpl="empty">Пустая сцена</button>
+      </div>
+    </div>
+    <button id="dupBtn" class="ghost small">Дублировать</button>
+    <button id="delBtn" class="ghost small danger">Удалить</button>
+    <span class="tl-hint">Перетащите сцену, чтобы поменять порядок · тяните правый край, чтобы изменить длину</span>
+    <label class="zoom" title="Ctrl + колесо мыши над таймлайном. Двойной щелчок по ползунку — вписать весь ролик">Масштаб <input type="range" id="zoom" min="8" max="240" step="1"></label>
+  </div>
+  <div class="tl-scroll" id="tlScroll">
+    <div class="tl-content" id="tlContent">
+      <div class="ruler" id="ruler"></div>
+      <div class="cachebar"><canvas id="cacheCv" height="4"></canvas></div>
+      <div class="track vtrack" id="vtrack"><span class="tlabel">V</span></div>
+      <div class="track atrack" id="atrack"><span class="tlabel">A</span><canvas id="waveCv"></canvas></div>
+      <div class="playhead" id="playhead"><i></i></div>
+    </div>
+  </div>
+</section>
+
+<div id="toast" class="toast" hidden></div>
+<audio id="audio" preload="auto"></audio>
+
+<script src="/ui/vendor/codemirror/codemirror.js"></script>
+<script src="/ui/vendor/codemirror/python.js"></script>
+<script src="/ui/vendor/codemirror/matchbrackets.js"></script>
+<script src="/ui/vendor/codemirror/active-line.js"></script>
+<script src="/ui/vendor/codemirror/comment.js"></script>
+<script src="/ui/help.js"></script>
+<script src="/ui/app.js"></script>
+</body>
+</html>
