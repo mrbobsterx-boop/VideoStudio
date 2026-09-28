@@ -4,6 +4,12 @@ const $ = id => document.getElementById(id);
 const TOKEN = (document.querySelector('meta[name="studio-token"]') || {}).content || '';
 const H = extra => Object.assign({ 'X-Studio-Token': TOKEN }, extra || {});
 async function asJson(r) {
+  if (r.status === 403) {
+    // программа перезапускалась — у этой вкладки старый ключ
+    const t = document.getElementById('toast');
+    t.innerHTML = '<b>Программа была перезапущена.</b> Обновите страницу (F5), чтобы продолжить работу.'; t.hidden = false;
+    return { error: 'Обновите страницу (F5)' };
+  }
   const t = await r.text();
   try { return JSON.parse(t); } catch (e) { return { error: t || ('HTTP ' + r.status) }; }
 }
@@ -16,7 +22,7 @@ const api = {
     x.open('POST', u);
     x.setRequestHeader('X-Studio-Token', TOKEN);
     x.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
-    x.onload = () => { try { resolve(JSON.parse(x.responseText)); } catch (e) { resolve({ error: x.responseText || ('HTTP ' + x.status) }); } };
+    x.onload = () => { if (x.status === 403) return resolve({ error: 'Программа была перезапущена — обновите страницу (F5)' }); try { resolve(JSON.parse(x.responseText)); } catch (e) { resolve({ error: x.responseText || ('HTTP ' + x.status) }); } };
     x.onerror = () => resolve({ error: 'Нет связи с программой' });
     x.send(file);
   }),
