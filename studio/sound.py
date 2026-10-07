@@ -49,6 +49,40 @@ def saw(f, t): return 2 * ((f * t) % 1) - 1
 def tt(d): return np.arange(int(d * SR)) / SR
 
 
+AUDIO_EXT = ('.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac')
+_CLIPS = {}
+
+
+def _load_clip(name, start, dur):
+    """Декодировать кусок аудиофайла (ищется в assets/ и audio/ проекта). Возвращает (L, R)."""
+    import os
+    import subprocess
+    from . import engine, kit
+    rel = engine.safe_rel(name)
+    dirs = list(kit.ASSET_DIRS or [os.path.join(kit.PROJECT, 'assets')]) + [os.path.join(kit.PROJECT, 'audio')]
+    path = None
+    for d in dirs:
+        for ext in ('',) + AUDIO_EXT:
+            p = os.path.join(d, rel + ext)
+            if os.path.isfile(p) and p.lower().endswith(AUDIO_EXT):
+                path = p
+                break
+        if path:
+            break
+    if not path:
+        raise FileNotFoundError("Звук '%s' не найден в «Медиа»" % name)
+    key = (path, os.path.getmtime(path), round(start, 3), round(dur, 3))
+    if key not in _CLIPS:
+        cmd = [engine.ffmpeg_exe(), '-v', 'error', '-ss', '%.3f' % max(0.0, start), '-t', '%.3f' % dur, '-i', path,
+               '-vn', '-f', 'f32le', '-ac', '2', '-ar', str(SR), '-']
+        raw = subprocess.run(cmd, capture_output=True, timeout=120).stdout
+        m = np.frombuffer(raw[:len(raw) // 8 * 8], np.float32).reshape(-1, 2).astype(np.float64)
+        if len(_CLIPS) > 16:
+            _CLIPS.clear()
+        _CLIPS[key] = (m[:, 0].copy(), m[:, 1].copy())
+    return _CLIPS[key]
+
+
 class SceneAudio:
     def __init__(self, dur, seed=0):
         self.dur = dur
@@ -71,6 +105,27 @@ class SceneAudio:
         self.L[i:j] += s * (1 - max(0, pan))
         self.R[i:j] += s * (1 + min(0, pan))
         self.WET[i:j] += s * wet
+
+    def clip(self, name, t0=0.0, g=1.0, start=0.0, dur=None, fade=0.05):
+        """Аудиофайл из «Медиа» (музыка, звук, голос): a.clip('Музыка/тема', 0, 0.8, start=12).
+        start — с какой секунды файла, dur — сколько играть (по умолчанию до конца сцены)."""
+        left = self.n / SR - t0
+        d = left if dur is None else min(dur, left)
+        if d <= 0:
+            return
+        L, R = _load_clip(name, start, d)
+        k = len(L)
+        f = int(fade * SR)
+        if f > 0 and k > 2 * f:
+            env = np.ones(k)
+            env[:f] = np.linspace(0, 1, f)
+            env[-f:] = np.linspace(1, 0, f)
+            L, R = L * env, R * env
+        i = int(t0 * SR)
+        j = min(self.n, i + k)
+        if j > i:
+            self.L[i:j] += L[:j - i] * g
+            self.R[i:j] += R[:j - i] * g
 
     def noise(self, d):
         return self.rng.standard_normal(int(d * SR))

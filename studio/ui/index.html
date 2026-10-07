@@ -3,22 +3,71 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="studio-token" content="%%STUDIO_TOKEN%%">
 <title>Shelter Studio</title>
+<link rel="icon" href="/ui/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/ui/vendor/codemirror/codemirror.css">
 <link rel="stylesheet" href="/ui/style.css">
 </head>
 <body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-start" viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M18 5 9 12l9 7z" fill="currentColor"/></symbol>
+  <symbol id="i-end" viewBox="0 0 24 24"><path d="M18 5v14"/><path d="M6 5l9 7-9 7z" fill="currentColor"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></symbol>
+  <symbol id="i-lib" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-ai" viewBox="0 0 24 24"><path d="M4 20l9.5-9.5"/><path d="M15 4v3M13.5 5.5h3M19 9v2M18 10h2M18 3.5l.6 1.4L20 5.5l-1.4.6L18 7.5l-.6-1.4L16 5.5l1.4-.6z"/><path d="M12 12l2-2"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4v4.5H8"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="M7.5 10 12 14.5 16.5 10"/><path d="M4.5 16.5v2a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15"/><path d="M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2"/><path d="M6.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.5h6a1.5 1.5 0 0 0 1.5-1.5l1-12.5"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17L12 16.5l-5.5 4z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M4 4l16 16"/><path d="M9.9 5.8A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.9 3.7M6.2 7.4A16.7 16.7 0 0 0 2.5 12S6 18.5 12 18.5a9.3 9.3 0 0 0 4-.9"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M6 14l6-6 6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 10l6 6 6-6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15.5v-11"/><path d="M7.5 9 12 4.5 16.5 9"/><path d="M4.5 16.5v2a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-2"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M7.5 4.5v15M16.5 4.5v15M3.5 9h4M3.5 15h4M16.5 9h4M16.5 15h4"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.7"/><path d="M20.5 16l-5-5-9 8.5"/></symbol>
+  <symbol id="i-type" viewBox="0 0 24 24"><path d="M5 6.5V5h14v1.5M12 5v14M9 19h6"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3.5l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></symbol>
+  <symbol id="i-fx" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5"/></symbol>
+  <symbol id="i-text" viewBox="0 0 24 24"><path d="M4.5 6.5h15M4.5 12h15M4.5 17.5h9"/></symbol>
+  <symbol id="i-media" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="12" height="12" rx="2"/><path d="M8.5 20.5h10a2 2 0 0 0 2-2v-10"/><path d="M8 7.5v4l3.5-2z" fill="currentColor"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.8 9.5a2.3 2.3 0 0 1 4.4.8c0 1.6-2.2 2-2.2 3.4"/><circle cx="12" cy="16.8" r=".6" fill="currentColor"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4.5 9.5h3l4.5-4v13l-4.5-4h-3z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/></symbol>
+  <symbol id="i-loop" viewBox="0 0 24 24"><path d="M4.5 11V9.5a3 3 0 0 1 3-3h12"/><path d="M16.5 3.5l3 3-3 3"/><path d="M19.5 13v1.5a3 3 0 0 1-3 3h-12"/><path d="M7.5 20.5l-3-3 3-3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M5.5 3.5h10l3 3v12a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z"/><path d="M8 3.5v5h7v-5M8 20.5v-6h8v6"/></symbol>
+</svg>
+
 <header class="top">
-  <div class="brand"><span class="mark"></span>Shelter Studio</div>
+  <div class="brand"><span class="mark"></span><span>Shelter <b>Studio</b></span></div>
   <input id="title" class="title-input" spellcheck="false" aria-label="Название проекта">
   <div class="status" id="status"></div>
-  <div class="export-box">
-    <div id="exportProgress" class="xprog" hidden>
-      <div class="xbar"><i id="xfill"></i></div>
-      <span id="xtext"></span>
-      <button class="ghost small" id="xcancel">Отмена</button>
+  <div class="top-actions">
+    <button class="hbtn" id="projBtn" title="Все ваши ролики: открыть другой, создать новый"><svg class="ic"><use href="#i-folder"/></svg>Проекты</button>
+    <button class="hbtn accent" id="amBtn" title="Собрать ролик из ваших картинок и видео автоматически"><svg class="ic"><use href="#i-spark"/></svg>Автомонтаж</button>
+    <button class="hbtn" id="libBtn" title="Готовые сцены и ваши сохранённые"><svg class="ic"><use href="#i-lib"/></svg>Библиотека</button>
+    <button class="hbtn" id="sndBtn" title="Звук ко всем сценам: автоматически или через ИИ"><svg class="ic"><use href="#i-volume"/></svg>Звук</button>
+    <button class="hbtn" id="aiBtn" title="Задание для ИИ и проверка его кода"><svg class="ic"><use href="#i-ai"/></svg>Сцена от ИИ</button>
+    <button class="hbtn" id="verBtn" title="Сохранённые версии проекта"><svg class="ic"><use href="#i-history"/></svg>Версии</button>
+    <div class="export-box">
+      <div id="exportProgress" class="xprog" hidden>
+        <div class="xbar"><i id="xfill"></i></div>
+        <span id="xtext"></span>
+        <button class="ghost small" id="xcancel">Отмена</button>
+      </div>
+      <button id="exportBtn" class="primary"><svg class="ic"><use href="#i-export"/></svg>Экспорт MP4</button>
     </div>
-    <button id="exportBtn" class="primary">Экспорт MP4</button>
   </div>
 </header>
 
@@ -26,48 +75,72 @@
   <section class="viewer">
     <div class="screen-wrap">
       <canvas id="screen" width="960" height="540"></canvas>
-      <div id="buffering" class="buffering" hidden>Рендер кадров…</div>
+      <div id="buffering" class="buffering" hidden><i class="spinner"></i>Рендер кадров…</div>
     </div>
     <div class="transport">
-      <button class="icon" id="bStart" title="В начало (Home)">⏮</button>
-      <button class="icon" id="bPrev" title="Кадр назад (←)">◂</button>
-      <button class="icon play" id="bPlay" title="Воспроизвести (Пробел)">▶</button>
-      <button class="icon" id="bNext" title="Кадр вперёд (→)">▸</button>
-      <button class="icon" id="bEnd" title="В конец (End)">⏭</button>
-      <div class="tc"><b id="tcCur">00:00:00</b><span> / </span><span id="tcTotal">00:00:00</span></div>
+      <button class="icon" id="bStart" title="В начало (Home)"><svg class="ic"><use href="#i-start"/></svg></button>
+      <button class="icon" id="bPrev" title="Кадр назад (←)"><svg class="ic"><use href="#i-prev"/></svg></button>
+      <button class="icon play" id="bPlay" title="Воспроизвести (Пробел)"><svg class="ic" id="playIc"><use href="#i-play"/></svg></button>
+      <button class="icon" id="bNext" title="Кадр вперёд (→)"><svg class="ic"><use href="#i-next"/></svg></button>
+      <button class="icon" id="bEnd" title="В конец (End)"><svg class="ic"><use href="#i-end"/></svg></button>
+      <div class="tc"><b id="tcCur">00:00:00</b><span class="sep">/</span><span id="tcTotal">00:00:00</span></div>
       <div class="scene-now" id="sceneNow"></div>
-      <label class="chk"><input type="checkbox" id="loop" checked> Повтор</label>
-      <label class="vol" title="Громкость превью">🔈<input type="range" id="vol" min="0" max="1" step="0.05" value="0.8"></label>
+      <label class="toggle" title="Повторять ролик по кругу"><input type="checkbox" id="loop" checked><svg class="ic"><use href="#i-loop"/></svg></label>
+      <label class="vol" title="Громкость превью"><svg class="ic"><use href="#i-volume"/></svg><input type="range" id="vol" min="0" max="1" step="0.05" value="0.8"></label>
     </div>
   </section>
 
   <section class="panel">
     <nav class="tabs" role="tablist">
-      <button data-tab="code" class="on">Код сцены</button>
-      <button data-tab="texts">Тексты</button>
-      <button data-tab="assets">Картинки</button>
-      <button data-tab="settings">Настройки</button>
-      <button data-tab="help">Шпаргалка</button>
+      <button data-tab="code" class="on"><svg class="ic"><use href="#i-code"/></svg><span>Код</span></button>
+      <button data-tab="layers"><svg class="ic"><use href="#i-layers"/></svg><span>Слои</span></button>
+      <button data-tab="fx"><svg class="ic"><use href="#i-fx"/></svg><span>Эффекты</span></button>
+      <button data-tab="texts"><svg class="ic"><use href="#i-text"/></svg><span>Тексты</span></button>
+      <button data-tab="assets"><svg class="ic"><use href="#i-media"/></svg><span>Медиа</span></button>
+      <button data-tab="settings"><svg class="ic"><use href="#i-settings"/></svg><span>Настройки</span></button>
+      <button data-tab="help"><svg class="ic"><use href="#i-help"/></svg><span>Справка</span></button>
     </nav>
 
+    <div class="inspector">
+      <label>Сцена <input id="scName" spellcheck="false"></label>
+      <label class="dur">Длина <input id="scDur" type="number" step="0.1" min="0.2"><span class="unit">с</span></label>
+      <span class="file" id="scFile"></span>
+    </div>
+
     <div class="tab on" id="tab-code">
-      <div class="inspector">
-        <label>Сцена <input id="scName" spellcheck="false"></label>
-        <label class="dur">Длина, с <input id="scDur" type="number" step="0.1" min="0.2"></label>
-        <span class="file" id="scFile"></span>
-      </div>
       <div class="editor-wrap"><div id="editor"></div></div>
       <div class="code-bar">
         <label class="chk"><input type="checkbox" id="autoSave" checked> Обновлять превью при наборе</label>
         <span id="saveState" class="save-state"></span>
-        <button id="saveBtn" class="secondary">Сохранить <kbd>Ctrl S</kbd></button>
+        <button id="saveBtn" class="secondary small"><svg class="ic"><use href="#i-save"/></svg>Сохранить <kbd>Ctrl S</kbd></button>
       </div>
       <pre id="errBox" class="err" hidden></pre>
     </div>
 
+    <div class="tab" id="tab-layers">
+      <div class="pane-head">
+        <div class="seg">
+          <button class="secondary small" data-addlayer="video"><svg class="ic"><use href="#i-film"/></svg>Видео</button>
+          <button class="secondary small" data-addlayer="image"><svg class="ic"><use href="#i-image"/></svg>Картинка</button>
+          <button class="secondary small" data-addlayer="text"><svg class="ic"><use href="#i-type"/></svg>Текст</button>
+        </div>
+      </div>
+      <p class="hint">Слои рисуются поверх кадра сцены без всякого кода: видео или картинка на весь кадр с подрезкой
+        и движением, надписи с анимацией. «Под кодом» — слой рисуется до кода сцены (как фон).</p>
+      <div id="layerList" class="layer-list"></div>
+    </div>
+
+    <div class="tab" id="tab-fx">
+      <div class="pane-head">
+        <select id="fxAdd" class="select"><option value="">+ Добавить эффект…</option></select>
+        <span class="muted small">порядок важен: эффекты применяются сверху вниз</span>
+      </div>
+      <div id="fxList" class="fx-list"></div>
+    </div>
+
     <div class="tab" id="tab-texts">
-      <div class="texts-head">
-        <input id="textSearch" placeholder="Найти текст или ключ…" spellcheck="false">
+      <div class="pane-head">
+        <input id="textSearch" class="search" placeholder="Найти текст или ключ…" spellcheck="false">
       </div>
       <p class="hint">Все надписи ролика. Поменяйте текст — сцены с ним перерисуются сами.
         Чтобы вставить другой текст внутрь строки: <code>{name_5}</code>, <code>{name_5|title}</code>.</p>
@@ -75,47 +148,65 @@
     </div>
 
     <div class="tab" id="tab-assets">
-      <div class="assets-head">
-        <label class="secondary filebtn">Добавить картинки<input type="file" id="assetFile" accept="image/*" multiple hidden></label>
-        <label class="chk"><input type="checkbox" id="cutout"> Убрать белый фон</label>
-        <button class="ghost small" id="openAssets">Открыть папку</button>
+      <div class="pane-head">
+        <label class="secondary small filebtn"><svg class="ic"><use href="#i-upload"/></svg>Добавить файлы<input type="file" id="assetFile" accept="image/*,video/*,audio/*,.mp4,.mov,.webm,.mkv,.m4v,.mp3,.wav,.ogg,.m4a,.flac" multiple hidden></label>
+        <label class="secondary small filebtn" title="Выберите папку на компьютере — все картинки, видео и музыка из неё загрузятся в одноимённую папку"><svg class="ic"><use href="#i-folder"/></svg>Добавить папку<input type="file" id="assetDir" webkitdirectory directory multiple hidden></label>
+        <label class="chk"><input type="checkbox" id="cutout"> Убрать белый фон у картинок</label>
+        <button class="ghost small" id="openAssets"><svg class="ic"><use href="#i-folder"/></svg>Открыть</button>
       </div>
-      <p class="hint">Нажмите на картинку — в код вставится <code>image('имя')</code> для фона
-        или <code>sprite('имя')</code> для вырезанного объекта. Можно перетащить файлы прямо сюда.</p>
-      <div id="assetGrid" class="asset-grid"></div>
+      <div id="uploadProg" class="upload-prog" hidden><div class="xbar"><i></i></div><span></span></div>
+      <p class="hint">Щелчок по картинке или видео — слой в выбранной сцене, <kbd>Alt</kbd>+щелчок — вставить в код.
+        Щелчок по треку — сделать музыкой ролика, ▶ — послушать. Файлы и целые папки можно перетащить прямо сюда.</p>
+      <div id="assetGrid"></div>
     </div>
 
     <div class="tab" id="tab-settings">
       <div class="set-group">
         <h3>Проект</h3>
+        <label class="row">Формат кадра
+          <select id="fmt" class="select" style="width:auto"><option value="16:9">16:9 — горизонтальный (YouTube, 1920×1080)</option>
+            <option value="9:16">9:16 — вертикальный (Reels, Shorts, TikTok, 1080×1920)</option>
+            <option value="1:1">1:1 — квадрат (1080×1080)</option></select></label>
         <label class="row">Кадров в секунду
-          <select id="fps"><option>24</option><option>25</option><option>30</option><option>50</option><option>60</option></select></label>
+          <select id="fps" class="select"><option>24</option><option>25</option><option>30</option><option>50</option><option>60</option></select></label>
+      </div>
+      <div class="set-group">
+        <h3>Шрифты</h3>
+        <p class="hint flush">Шрифты по ролям: заголовки (<code>bold</code>), курсив (<code>serif</code>), обычный текст (<code>text</code>).
+          Меняется во всём ролике сразу. Свои шрифты — файлы .ttf / .otf (например, с fonts.google.com).</p>
+        <div id="fontRoles" class="font-roles"></div>
+        <div class="row">
+          <label class="secondary small filebtn"><svg class="ic"><use href="#i-upload"/></svg>Добавить шрифт<input type="file" id="fontFile" accept=".ttf,.otf" multiple hidden></label>
+          <button class="ghost small" data-open="fonts"><svg class="ic"><use href="#i-folder"/></svg>Папка шрифтов</button>
+        </div>
+        <div id="fontList" class="font-list"></div>
       </div>
       <div class="set-group">
         <h3>Картинка</h3>
-        <label class="row chk"><input type="checkbox" id="lkLetter"> Кинополосы сверху и снизу</label>
+        <label class="row chk"><input type="checkbox" id="lkLetter"> Кинополосы сверху и снизу <span class="muted small">(только для 16:9)</span></label>
         <label class="row chk"><input type="checkbox" id="lkVig"> Виньетка</label>
         <label class="row chk"><input type="checkbox" id="lkHits"> Тряска и вспышка на ударах (HITS)</label>
-        <label class="row">Зерно плёнки <input type="range" id="lkGrain" min="0" max="0.2" step="0.01"><span id="lkGrainV"></span></label>
+        <label class="row">Зерно плёнки <input type="range" id="lkGrain" min="0" max="0.2" step="0.01"><span id="lkGrainV" class="val"></span></label>
       </div>
       <div class="set-group">
         <h3>Звук</h3>
         <label class="row chk"><input type="checkbox" id="auGen"> Сгенерированный саундтрек (из функций sound() в сценах)</label>
-        <label class="row">Его громкость <input type="range" id="auGenVol" min="0" max="1.5" step="0.05"><span id="auGenVolV"></span></label>
+        <label class="row">Его громкость <input type="range" id="auGenVol" min="0" max="1.5" step="0.05"><span id="auGenVolV" class="val"></span></label>
         <div class="row">Своя музыка:
-          <span id="musicName" class="muted">нет</span>
+          <span id="musicName" class="pill">нет</span>
           <label class="secondary small filebtn">Загрузить…<input type="file" id="musicFile" accept="audio/*" hidden></label>
           <button class="ghost small" id="musicRemove">Убрать</button>
         </div>
-        <label class="row">Громкость музыки <input type="range" id="auMusVol" min="0" max="1.5" step="0.05"><span id="auMusVolV"></span></label>
-        <label class="row">Сдвиг музыки, с <input type="number" id="auMusOff" step="0.1"></label>
-        <label class="row">Затухание в конце, с <input type="number" id="auFade" step="0.1" min="0"></label>
+        <label class="row">Громкость музыки <input type="range" id="auMusVol" min="0" max="1.5" step="0.05"><span id="auMusVolV" class="val"></span></label>
+        <label class="row">Сдвиг музыки, с <input type="number" id="auMusOff" step="0.1" class="num"></label>
+        <label class="row">Затухание в конце, с <input type="number" id="auFade" step="0.1" min="0" class="num"></label>
       </div>
       <div class="set-group">
         <h3>Папки</h3>
-        <div class="row"><button class="ghost small" data-open="scenes">Сцены</button>
-          <button class="ghost small" data-open="assets">Картинки</button>
-          <button class="ghost small" data-open="exports">Готовые видео</button></div>
+        <div class="row"><button class="ghost small" data-open="scenes"><svg class="ic"><use href="#i-folder"/></svg>Сцены</button>
+          <button class="ghost small" data-open="assets"><svg class="ic"><use href="#i-folder"/></svg>Медиа</button>
+          <button class="ghost small" data-open="exports"><svg class="ic"><use href="#i-folder"/></svg>Готовые видео</button>
+          <button class="ghost small" data-open="library"><svg class="ic"><use href="#i-folder"/></svg>Библиотека</button></div>
         <p class="muted small" id="projDir"></p>
       </div>
     </div>
@@ -127,29 +218,43 @@
 <section class="timeline">
   <div class="tl-bar">
     <div class="add-wrap">
-      <button id="addBtn" class="secondary small">+ Сцена</button>
+      <button id="addBtn" class="secondary small"><svg class="ic"><use href="#i-plus"/></svg>Сцена</button>
       <div id="addMenu" class="menu" hidden>
         <label>Название <input id="newName" value="New scene" spellcheck="false"></label>
-        <button data-tpl="title">Титр — крупная надпись</button>
-        <button data-tpl="image">Картинка + движение камеры</button>
-        <button data-tpl="empty">Пустая сцена</button>
+        <button data-tpl="layers"><svg class="ic"><use href="#i-layers"/></svg>Из слоёв — видео / картинка / текст</button>
+        <button data-tpl="title"><svg class="ic"><use href="#i-type"/></svg>Титр — крупная надпись</button>
+        <button data-tpl="image"><svg class="ic"><use href="#i-image"/></svg>Картинка + движение камеры (код)</button>
+        <button data-tpl="empty"><svg class="ic"><use href="#i-code"/></svg>Пустая сцена (код)</button>
+        <div class="menu-sep"></div>
+        <button id="addFromLib"><svg class="ic"><use href="#i-lib"/></svg>Из библиотеки…</button>
+        <button id="addFromAI"><svg class="ic"><use href="#i-ai"/></svg>Сцена от ИИ…</button>
       </div>
     </div>
-    <button id="dupBtn" class="ghost small">Дублировать</button>
-    <button id="delBtn" class="ghost small danger">Удалить</button>
-    <span class="tl-hint">Перетащите сцену, чтобы поменять порядок · тяните правый край, чтобы изменить длину</span>
+    <button id="dupBtn" class="ghost small" title="Дублировать сцену"><svg class="ic"><use href="#i-copy"/></svg>Дублировать</button>
+    <button id="saveLibBtn" class="ghost small" title="Сохранить сцену в библиотеку, чтобы использовать в других роликах"><svg class="ic"><use href="#i-bookmark"/></svg>В библиотеку</button>
+    <button id="delBtn" class="ghost small danger" title="Удалить сцену"><svg class="ic"><use href="#i-trash"/></svg>Удалить</button>
+    <span class="tl-hint">Перетащите сцену — поменять порядок · правый край — длина · полоски под сценами — слои</span>
     <label class="zoom" title="Ctrl + колесо мыши над таймлайном. Двойной щелчок по ползунку — вписать весь ролик">Масштаб <input type="range" id="zoom" min="8" max="240" step="1"></label>
   </div>
   <div class="tl-scroll" id="tlScroll">
     <div class="tl-content" id="tlContent">
       <div class="ruler" id="ruler"></div>
-      <div class="cachebar"><canvas id="cacheCv" height="4"></canvas></div>
+      <div class="cachebar"><canvas id="cacheCv" height="3"></canvas></div>
       <div class="track vtrack" id="vtrack"><span class="tlabel">V</span></div>
+      <div class="track ltrack" id="ltrack"><span class="tlabel">L</span></div>
       <div class="track atrack" id="atrack"><span class="tlabel">A</span><canvas id="waveCv"></canvas></div>
       <div class="playhead" id="playhead"><i></i></div>
     </div>
   </div>
 </section>
+
+<div id="modal" class="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-head"><h2 id="modalTitle"></h2><div class="modal-tools" id="modalTools"></div>
+      <button class="icon" id="modalClose" title="Закрыть (Esc)"><svg class="ic"><use href="#i-close"/></svg></button></div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
 
 <div id="toast" class="toast" hidden></div>
 <audio id="audio" preload="auto"></audio>
@@ -161,5 +266,7 @@
 <script src="/ui/vendor/codemirror/comment.js"></script>
 <script src="/ui/help.js"></script>
 <script src="/ui/app.js"></script>
+<script src="/ui/panels.js"></script>
+<script src="/ui/modals.js"></script>
 </body>
 </html>
