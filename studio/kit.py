@@ -308,7 +308,13 @@ def bold(fr, t, t0, t1, s, cy=None, size=150, cx=None, color=CREAM, track=0.08, 
 
 # ================================================================ images
 _IMG = _LRU(max_bytes=700 << 20)
-IMG_EXTS = ('', '.png', '.jpg', '.jpeg', '.webp')
+IMG_EXTS = ('', '.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif', '.HEIC', '.JPG')
+
+try:                          # фото с iPhone (.HEIC) — если установлен pillow-heif
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except Exception:
+    pass
 VID_EXTS = ('.mp4', '.mov', '.webm', '.mkv', '.m4v', '.avi')
 
 

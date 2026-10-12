@@ -18,6 +18,7 @@ FORBIDDEN_MODULES = {'os', 'sys', 'subprocess', 'shutil', 'socket', 'requests', 
                      'webbrowser', 'smtplib', 'glob', 'tempfile', 'signal'}
 FORBIDDEN_CALLS = {'open', 'exec', 'eval', '__import__', 'compile', 'input', 'exit', 'quit', 'globals', 'breakpoint'}
 ALLOWED_MODULES = {'studio.kit', 'math', 'random', 'numpy', 'cv2', 'colorsys', 'itertools', 'functools'}
+ALLOWED_PREFIXES = ('studio.looks.',)   # общие модули стиля роликов (studio/looks/*.py)
 
 
 def _sig(fn):
@@ -248,7 +249,7 @@ def static_check(code):
                 root = m.split('.')[0]
                 if root in FORBIDDEN_MODULES:
                     errors.append('Запрещённый импорт «%s» (строка %d)' % (m, node.lineno))
-                elif m not in ALLOWED_MODULES and root not in ALLOWED_MODULES:
+                elif m not in ALLOWED_MODULES and root not in ALLOWED_MODULES and not m.startswith(ALLOWED_PREFIXES):
                     warnings.append('Необычный импорт «%s» (строка %d)' % (m, node.lineno))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_CALLS:
             errors.append('Запрещённый вызов %s() (строка %d)' % (node.func.id, node.lineno))

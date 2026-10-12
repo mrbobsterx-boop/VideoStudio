@@ -33,7 +33,7 @@ SR = 44100
 MAX_CACHE = 3000          # кадров превью в памяти
 HANG_SECONDS = 40         # столько может считаться один кадр/звук сцены, потом пул перезапускается
 VIDEO_EXT = ('.mp4', '.mov', '.webm', '.mkv', '.m4v', '.avi')
-IMG_EXT = ('.png', '.jpg', '.jpeg', '.webp')
+IMG_EXT = ('.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif')
 AUDIO_EXT = ('.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac')
 
 

@@ -3,3 +3,4 @@ opencv-python
 pillow
 scipy
 imageio-ffmpeg
+pillow-heif
