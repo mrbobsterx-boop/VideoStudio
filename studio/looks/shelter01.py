@@ -369,6 +369,40 @@ def marker_band(fr, x, y, w, h, k=1.0, color=None, alpha=0.3):
 _EXT_ALT = ('', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.HEIC', '.JPG', '.heif')
 
 
+STANDIN_DEFAULT = '16-main-menu.png'
+
+
+def _standin(name, w=1920, h=1080, t=None):
+    """Заглушка-картинка: одна существующая картинка (ключ «look_standin» во вкладке «Тексты», по умолчанию
+    16-main-menu.png) вместо любого отсутствующего файла. В углу — маленькая подпись, какого файла нет.
+    Для видео картинка медленно «плывёт» по времени, чтобы кадр не стоял. Пустой ключ — серая заглушка."""
+    sname = tx('look_standin', STANDIN_DEFAULT).strip()
+    if not sname or sname == name:
+        return None
+    try:
+        src = kit.image(sname)
+    except Exception:
+        return None
+
+    def make():
+        a = np.zeros((h, w, 3), np.uint8)
+        fit_into(a, src, (0, 0, w, h), 0.5, 0.5, 1.12)
+        lab = 'заглушка · ' + name
+        s = max(14, int(w / 80))
+        tw = text_w(lab, FM, 500, s) + 2 * s
+        blit(a, rrect(tw, s * 2, s // 2, C['midnight'], None, 0, 200), w - tw - s, h - s * 3)
+        text_at(a, lab, w - tw / 2 - s, h - s * 2, FM, 500, s, C['faint'], align='c', vcenter=True)
+        return a
+    base = _CACHE.get2(('si', sname, name, w, h), make)
+    if t is None:
+        return base
+    dx = math.sin(t * 0.35) * w * 0.025
+    dy = math.cos(t * 0.27) * h * 0.02
+    z = 1.0 + 0.03 * (0.5 + 0.5 * math.sin(t * 0.2))
+    M = np.float32([[z, 0, dx + w / 2 * (1 - z)], [0, z, dy + h / 2 * (1 - z)]])
+    return cv2.warpAffine(base, M, (w, h), borderMode=cv2.BORDER_REFLECT)
+
+
 def placeholder(name, w=1920, h=1080, note=''):
     """Серая заглушка с именем файла (если файла нет)."""
     key = ('ph', name, w, h, note)
@@ -396,7 +430,7 @@ def asset_img(name):
             return kit.image(cand)
         except Exception:
             continue
-    return placeholder(name)
+    return _standin(name) if _standin(name) is not None else placeholder(name)
 
 
 def asset_vid(name, t, start=0.0, speed=1.0):
@@ -404,7 +438,9 @@ def asset_vid(name, t, start=0.0, speed=1.0):
     try:
         return kit.video(name, t, start=start, speed=speed, loop=True)
     except Exception:
-        return placeholder(name, note='видео · %.1f с' % (start + max(0.0, t) * speed))
+        tt_ = start + max(0.0, t) * speed
+        si = _standin(name, t=tt_)
+        return si if si is not None else placeholder(name, note='видео · %.1f с' % tt_)
 
 
 def asset_exists(name):
