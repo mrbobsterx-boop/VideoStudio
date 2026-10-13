@@ -63,9 +63,73 @@ def code_hash(code):
     return hashlib.sha1(code.encode('utf-8')).hexdigest()[:12]
 
 
+def project_dirs(project_dir, sub):
+    """Папки sub ('assets', 'fonts', 'lib') проекта: своя + из общих папок, перечисленных в project.json
+    ключом "shared": ["../.."] (относительно проекта) — например, рилсы берут assets/ и lib/ большого ролика."""
+    out = [os.path.join(project_dir, sub)]
+    try:
+        with open(os.path.join(project_dir, 'project.json'), 'r', encoding='utf-8') as f:
+            shared = json.load(f).get('shared') or []
+    except (OSError, ValueError):
+        shared = []
+    for rel in shared if isinstance(shared, list) else []:
+        if not isinstance(rel, str) or os.path.isabs(rel):
+            continue
+        d = os.path.abspath(os.path.join(project_dir, rel, sub))
+        if os.path.isdir(d) and d not in out:
+            out.append(d)
+    return out
+
+
+_LIB = {'dir': None, 'sig': None}
+
+
+def lib_signature(project_dir):
+    """Отпечаток папок lib/ проекта (имена и время изменения .py) — чтобы заметить правки модулей стиля."""
+    out = []
+    for d in project_dirs(project_dir, 'lib'):
+        if not os.path.isdir(d):
+            continue
+        for root, dirs, files in os.walk(d):
+            dirs[:] = [x for x in dirs if x != '__pycache__']
+            for f in sorted(files):
+                if f.endswith('.py'):
+                    fp = os.path.join(root, f)
+                    try:
+                        out.append((fp, os.path.getmtime(fp), os.path.getsize(fp)))
+                    except OSError:
+                        pass
+    return tuple(sorted(out))
+
+
+def use_project_lib(project_dir):
+    """Сделать папку lib/ проекта пакетом `lib`: в сцене — `from lib.мой_стиль import *`.
+    Общие компоненты ролика живут в самом проекте, а не в коде редактора. Если файлы в lib/ изменились
+    или открыт другой проект — модули перезагружаются, кэш скомпилированных сцен сбрасывается."""
+    dirs = [os.path.abspath(x) for x in project_dirs(project_dir, 'lib')]
+    d = tuple(dirs)
+    sig = lib_signature(project_dir)
+    if _LIB['dir'] == d and _LIB['sig'] == sig and 'lib' in sys.modules:
+        return False
+    for name in [n for n in sys.modules if n == 'lib' or n.startswith('lib.')]:
+        del sys.modules[name]
+    pkg = types.ModuleType('lib')
+    pkg.__path__ = dirs
+    pkg.__package__ = 'lib'
+    pkg.__file__ = os.path.join(dirs[0], '__init__.py')
+    sys.modules['lib'] = pkg
+    import importlib
+    importlib.invalidate_caches()
+    changed = _LIB['dir'] is not None
+    _LIB['dir'], _LIB['sig'] = d, sig
+    _MODS.clear()
+    return changed
+
+
 def load_module(path, code):
     """Скомпилировать код сцены в модуль (кэшируется по хэшу кода)."""
     from . import kit
+    use_project_lib(kit.PROJECT)
     h = code_hash(code)
     key = (path, h, kit.W, kit.H)       # «from studio.kit import *» копирует W, H — модуль зависит от формата
     m = _MODS.get(key)
@@ -236,8 +300,8 @@ def _winit(project_dir, pkg_parent):
         sys.path.insert(0, pkg_parent)
     from . import kit
     kit.PROJECT = project_dir
-    kit.ASSET_DIRS = [os.path.join(project_dir, 'assets')]
-    kit.FONT_DIRS = [os.path.join(project_dir, 'fonts')]
+    kit.ASSET_DIRS = project_dirs(project_dir, 'assets')
+    kit.FONT_DIRS = project_dirs(project_dir, 'fonts')
     cv2.setNumThreads(1)
 
 
@@ -550,8 +614,8 @@ class Studio:
         self.load()
         from . import kit
         kit.PROJECT = self.dir
-        kit.ASSET_DIRS = [os.path.join(self.dir, 'assets')]
-        kit.FONT_DIRS = [os.path.join(self.dir, 'fonts')]
+        kit.ASSET_DIRS = project_dirs(self.dir, 'assets')
+        kit.FONT_DIRS = project_dirs(self.dir, 'fonts')
         kit.set_frame(*self.size)
         n = workers or max(1, min((os.cpu_count() or 2) - 1, 6))
         self.nworkers = n
@@ -633,6 +697,9 @@ class Studio:
         p.setdefault('fonts', {})
         p.setdefault('scenes', [])
         p.setdefault('format', '16:9')
+        # чего нет в project.json — нейтрально: без кинополос, виньетки и зерна редактора
+        for k, v in (('letterbox', False), ('vignette', False), ('grain', 0.0), ('hits', True)):
+            p['look'].setdefault(k, v)
         from . import fx, layers
         for s in p['scenes']:
             s['layers'] = [x for x in (layers.clean(L) for L in s.get('layers', [])) if x]
@@ -641,6 +708,10 @@ class Studio:
             self.p = p
             for s in p['scenes']:
                 self._read_code(s)
+            if 'ambience' not in p['audio']:
+                # фоновый гул и ветер (как в трейлере SHELTER) — только если сцены сами задают AMBIENCE / WIND
+                metas = [static_meta(self.codes.get(s['id'], '')) for s in p['scenes']]
+                p['audio']['ambience'] = any(m['amb'] is not None or m['wind'] is not None for m in metas)
 
     def reload(self):
         """Перечитать проект с диска (после восстановления версии)."""
@@ -825,8 +896,8 @@ class Studio:
         return dict(path=self.scene_path(s), code=self.codes[s['id']], t=lfi / fps, dur=float(s['dur']),
                     lfi=lfi, look=dict(self.p['look']), texts=dict(self.p['texts']),
                     layers=copy.deepcopy(s.get('layers', [])), fx=copy.deepcopy(s.get('fx', [])),
-                    fonts=self.font_roles(), asset_dirs=[os.path.join(self.dir, 'assets')],
-                    font_dirs=[os.path.join(self.dir, 'fonts')], size=self.size)
+                    fonts=self.font_roles(), asset_dirs=project_dirs(self.dir, 'assets'),
+                    font_dirs=project_dirs(self.dir, 'fonts'), size=self.size)
 
     def _submit(self, s, lfi):
         sid = s['id']
@@ -929,6 +1000,7 @@ class Studio:
                 last_wd = time.time()
                 try:
                     self._watchdog()
+                    self._watch_lib()
                 except Exception:
                     traceback.print_exc()
             if self.export_state.get('state') == 'running':
@@ -972,6 +1044,20 @@ class Studio:
                     break
                 traceback.print_exc()
                 time.sleep(0.5)
+
+    def _watch_lib(self):
+        """Изменились файлы в lib/ проекта (модуль стиля) — пересчитать кадры и звук всех сцен."""
+        sig = lib_signature(self.dir)
+        if getattr(self, '_lib_sig', None) is None:
+            self._lib_sig = sig
+            return
+        if sig != self._lib_sig:
+            self._lib_sig = sig
+            with self.lock:
+                self._stems.clear()
+                self.hung.clear()
+            self.invalidate()
+            self._audio_dirty.set()
 
     def _evict(self, tl, ph):
         """Убрать кадры, дальше всего отстоящие от курсора."""
@@ -1018,7 +1104,7 @@ class Studio:
     def base_task(self):
         with self.lock:
             return dict(look=dict(self.p['look']), texts=dict(self.p['texts']), fonts=self.font_roles(),
-                        asset_dirs=[os.path.join(self.dir, 'assets')], font_dirs=[os.path.join(self.dir, 'fonts')],
+                        asset_dirs=project_dirs(self.dir, 'assets'), font_dirs=project_dirs(self.dir, 'fonts'),
                         layers=[], fx=[], size=self.size)
 
     # ------------------------------------------------------------------ edits
@@ -1219,6 +1305,8 @@ class Studio:
             A = self.p['audio']
             if 'generated' in audio:
                 A['generated'] = bool(audio['generated'])
+            if 'ambience' in audio:
+                A['ambience'] = bool(audio['ambience'])
             for k, d, lo, hi in (('generated_volume', 1.0, 0, 3), ('music_volume', 0.8, 0, 3),
                                  ('music_offset', 0.0, -3600, 3600), ('fade_out', 1.5, 0, 30)):
                 if k in audio:
@@ -1391,7 +1479,8 @@ class Studio:
                 i = int(f0 / fps * SR)
                 j = min(M, i + len(sl))
                 L[i:j] += sl[:j - i]; R[i:j] += sr[:j - i]; WET[i:j] += sw[:j - i]
-            # ambience automation
+            # фоновый гул и ветер (выключаются в Настройках: «Фоновый гул и ветер»)
+            amb_on = acfg.get('ambience', True)
             pts_a, pts_w = [], []
             prev_a, prev_w = 0.4, 0.3
             for s, f0, n in tl:
@@ -1411,8 +1500,9 @@ class Studio:
                   np.sin(2 * np.pi * 73.42 * t) * 0.25) * (0.75 + 0.25 * np.sin(2 * np.pi * 0.13 * t))
             rng = np.random.default_rng(3)
             wind = lp(rng.standard_normal(M), 380, 2) * (0.6 + 0.4 * np.sin(2 * np.pi * 0.21 * t + 2)) * 1.2
-            L += dr * auto * 0.28 + wind * wauto * 0.25
-            R += dr * auto * 0.28 + wind * wauto * 0.25 * 0.9
+            if amb_on:
+                L += dr * auto * 0.28 + wind * wauto * 0.25
+                R += dr * auto * 0.28 + wind * wauto * 0.25 * 0.9
             # reverb
             if np.abs(WET).max() > 0:
                 tI = np.arange(int(2.8 * SR)) / SR
@@ -1499,11 +1589,11 @@ class Studio:
         rel = safe_rel(name)
         if not rel:
             return None
-        d = os.path.join(self.dir, 'assets')
-        for ext in ('',) + tuple(exts):
-            p = os.path.join(d, rel + ext)
-            if os.path.isfile(p):
-                return p
+        for d in project_dirs(self.dir, 'assets'):
+            for ext in ('',) + tuple(exts):
+                p = os.path.join(d, rel + ext)
+                if os.path.isfile(p):
+                    return p
         return None
 
     def list_media(self):
@@ -1616,8 +1706,8 @@ class Studio:
                     scenes[s['id']] = dict(path=self.scene_path(s), code=self.codes[s['id']], dur=float(s['dur']),
                                            name=s['name'], layers=copy.deepcopy(s.get('layers', [])),
                                            fx=copy.deepcopy(s.get('fx', [])),
-                                           asset_dirs=[os.path.join(self.dir, 'assets')],
-                                           font_dirs=[os.path.join(self.dir, 'fonts')])
+                                           asset_dirs=project_dirs(self.dir, 'assets'),
+                                           font_dirs=project_dirs(self.dir, 'fonts'))
                 look, texts, fonts = dict(self.p['look']), dict(self.p['texts']), self.font_roles()
                 title = self.p.get('title', 'video')
             frames = []

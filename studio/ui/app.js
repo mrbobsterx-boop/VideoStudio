@@ -819,6 +819,7 @@ function updateSettings() {
   $('lkHits').checked = L.hits !== false;
   setv('lkGrain', L.grain ?? 0.07); $('lkGrainV').textContent = (+(L.grain ?? 0.07)).toFixed(2);
   $('auGen').checked = A.generated !== false;
+  $('auAmb').checked = A.ambience !== false;
   setv('auGenVol', A.generated_volume ?? 1); $('auGenVolV').textContent = (+(A.generated_volume ?? 1)).toFixed(2);
   setv('auMusVol', A.music_volume ?? 0.8); $('auMusVolV').textContent = (+(A.music_volume ?? 0.8)).toFixed(2);
   setv('auMusOff', A.music_offset ?? 0);
@@ -837,6 +838,7 @@ function updateSettings() {
     $('lkGrain').onchange = e => look('grain', +e.target.value);
     $('lkGrain').oninput = e => { $('lkGrainV').textContent = (+e.target.value).toFixed(2); };
     $('auGen').onchange = e => aud('generated', e.target.checked);
+    $('auAmb').onchange = e => aud('ambience', e.target.checked);
     $('auGenVol').onchange = e => aud('generated_volume', +e.target.value);
     $('auGenVol').oninput = e => { $('auGenVolV').textContent = (+e.target.value).toFixed(2); };
     $('auMusVol').onchange = e => aud('music_volume', +e.target.value);

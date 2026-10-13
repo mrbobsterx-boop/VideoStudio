@@ -38,6 +38,7 @@ TOKEN = secrets.token_urlsafe(24)
 PORT = 0
 _THUMBS = {}
 _SWITCH = threading.Lock()
+_ALLOWED = {}       # проекты, выбранные пользователем (папка/zip) и ещё не открытые: id -> dict(path, imported)
 
 
 def switch_project(path):
@@ -464,7 +465,27 @@ class H(BaseHTTPRequestHandler):
                 switch_project(d)
                 return self.js(dict(ok=True, id=projects._pid(d)))
             if p == '/api/projects/open':
-                switch_project(projects.resolve(self.jbody().get('id', ''), S.dir))
+                return self.open_project(self.jbody())
+            if p == '/api/projects/inspect':
+                return self.js(self.project_info(str(self.jbody().get('path', '')).strip().strip('"')))
+            if p == '/api/projects/pick':
+                path = projects.pick(self.jbody().get('kind', 'dir'))
+                if not path:
+                    return self.js(dict(cancel=True))
+                return self.js(self.project_info(path))
+            if p == '/api/projects/upload':
+                return self.upload_project(q)
+            if p == '/api/projects/unzip':
+                pid = str(self.jbody().get('id', ''))
+                name = os.path.basename(pid[4:] if pid.startswith('zip:') else pid)
+                path = os.path.join(projects.PROJECTS, name)
+                if not (name.lower().endswith('.zip') and os.path.isfile(path)):
+                    raise ValueError('Архив не найден')
+                return self.js(self.project_info(path))
+            if p == '/api/projects/discard':
+                d = _ALLOWED.get(str(self.jbody().get('id', '')))
+                if d and d.get('imported'):
+                    projects.discard(d['path'])
                 return self.js(dict(ok=True))
             if p == '/api/projects/duplicate':
                 S.save(now=True)
@@ -590,6 +611,63 @@ class H(BaseHTTPRequestHandler):
         _THUMBS.pop(stem, None)
         S.invalidate_asset(stem)
         return self.js(dict(ok=True, name=stem))
+
+    # ---------------- открыть проект из папки / zip
+    def project_info(self, path):
+        """Папка или zip -> данные проекта для окна подтверждения. Zip сначала распаковывается в projects/."""
+        if not path:
+            raise ValueError('Укажите папку проекта или zip-архив')
+        path = os.path.abspath(os.path.expanduser(path))
+        imported, skipped = False, 0
+        if os.path.isfile(path) and path.lower().endswith('.zip'):
+            d, skipped = projects.import_zip(path)
+            imported = True
+        elif os.path.isdir(path):
+            d = projects.find_root(path)
+            if not d:
+                raise ValueError('В этой папке нет project.json (искал и во вложенных папках)')
+        else:
+            raise ValueError('Не найдено: %s' % path)
+        info = projects.inspect(d)
+        info.update(imported=imported, skipped=skipped)
+        _ALLOWED[info['id']] = dict(path=d, imported=imported)
+        return info
+
+    def upload_project(self, q):
+        name = os.path.basename(unquote(q.get('name') or 'project.zip'))
+        if not name.lower().endswith('.zip'):
+            raise ValueError('Нужен zip-архив')
+        inc = os.path.join(projects.PROJECTS, '.incoming')
+        os.makedirs(inc, exist_ok=True)
+        tmp = os.path.join(inc, secrets.token_hex(6) + '.zip')
+        try:
+            self.save_upload(tmp)
+            d, skipped = projects.import_zip(tmp, os.path.splitext(name)[0])
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        info = projects.inspect(d)
+        info.update(imported=True, skipped=skipped)
+        _ALLOWED[info['id']] = dict(path=d, imported=True)
+        return self.js(info)
+
+    def open_project(self, b):
+        pid = str(b.get('id', ''))
+        a = _ALLOWED.get(pid)
+        d = a['path'] if a else projects.resolve(pid, S.dir)
+        info = projects.inspect(d)
+        if info['too_old']:
+            raise ValueError('Проекту нужна версия VideoStudio %s, у вас %s. Обновите программу (git pull) и откройте снова.'
+                             % (info['editor_min'], info['editor']))
+        if not info['known'] and not b.get('trust'):
+            info['need_confirm'] = True
+            _ALLOWED[info['id']] = dict(path=d, imported=bool(a and a.get('imported')))
+            return self.js(info)
+        switch_project(d)
+        _ALLOWED.pop(pid, None)
+        return self.js(dict(ok=True))
 
     def list_assets(self):
         return S.list_media()

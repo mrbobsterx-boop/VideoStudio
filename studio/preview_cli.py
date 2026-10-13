@@ -1,7 +1,7 @@
 """
 Превью сцен без запуска редактора: кадры в JPEG и (по желанию) время рендера.
 
-    python -m studio.preview_cli СЦЕНА.py ДЛИНА ПАПКА_ВЫХОДА [--project project] [--times 0.1,5,9.9]
+    python -m studio.preview_cli СЦЕНА.py ДЛИНА ПАПКА_ВЫХОДА [--project папка_проекта] [--times 0.1,5,9.9]
                                   [--assets ПАПКА ...] [--fonts ПАПКА] [--width 960] [--sound файл.wav]
 
 По умолчанию — три кадра: начало (0.2 с), середина, конец (длина − 0.2 с). Вид кадра — как в ролике без
@@ -22,7 +22,7 @@ def main(argv=None):
     ap.add_argument('scene')
     ap.add_argument('dur', type=float)
     ap.add_argument('out')
-    ap.add_argument('--project', default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'project'))
+    ap.add_argument('--project', default='', help='папка проекта (по умолчанию — та, где лежит scenes/ со сценой)')
     ap.add_argument('--times', default='')
     ap.add_argument('--assets', nargs='*', default=[])
     ap.add_argument('--fonts', default='')
@@ -32,14 +32,18 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     from . import engine, kit
+    if not a.project:
+        up = os.path.dirname(os.path.dirname(os.path.abspath(a.scene)))
+        a.project = up if os.path.isfile(os.path.join(up, 'project.json')) else \
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'project')
     kit.PROJECT = a.project
     code = open(a.scene, encoding='utf-8').read()
     times = [float(x) for x in a.times.split(',') if x.strip()] or [0.2, a.dur / 2, max(0.0, a.dur - 0.2)]
     os.makedirs(a.out, exist_ok=True)
     task_base = dict(path=os.path.abspath(a.scene), code=code, dur=a.dur, lfi=0, size=(1920, 1080),
                      look=dict(letterbox=False, vignette=False, grain=0.0, hits=True), texts={}, layers=[], fx=[],
-                     fonts={}, asset_dirs=[os.path.join(a.project, 'assets')] + list(a.assets),
-                     font_dirs=[a.fonts or os.path.join(a.project, 'fonts')])
+                     fonts={}, asset_dirs=engine.project_dirs(a.project, 'assets') + list(a.assets),
+                     font_dirs=[a.fonts] if a.fonts else engine.project_dirs(a.project, 'fonts'))
     base = a.prefix or os.path.splitext(os.path.basename(a.scene))[0]
     worst = 0.0
     for i, t in enumerate(times):

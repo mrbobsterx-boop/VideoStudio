@@ -18,7 +18,7 @@ FORBIDDEN_MODULES = {'os', 'sys', 'subprocess', 'shutil', 'socket', 'requests', 
                      'webbrowser', 'smtplib', 'glob', 'tempfile', 'signal'}
 FORBIDDEN_CALLS = {'open', 'exec', 'eval', '__import__', 'compile', 'input', 'exit', 'quit', 'globals', 'breakpoint'}
 ALLOWED_MODULES = {'studio.kit', 'math', 'random', 'numpy', 'cv2', 'colorsys', 'itertools', 'functools'}
-ALLOWED_PREFIXES = ('studio.looks.',)   # общие модули стиля роликов (studio/looks/*.py)
+ALLOWED_PREFIXES = ('lib.',)   # модули стиля из папки lib/ самого проекта
 
 
 def _sig(fn):
@@ -151,6 +151,7 @@ def brief(studio, goal='', dur=4.0, name='', assets=None, style='', example_sid=
 ## Жёсткие правила
 1. Первая строка — докстрока с кратким описанием сцены по-русски: `\"\"\"Что происходит в сцене.\"\"\"`
 2. Вторая строка — `from studio.kit import *` . Больше ничего импортировать нельзя, кроме `math`, `random`
+   и модулей самого проекта из его папки `lib/` (`from lib.имя import *`), если они там есть
    (уже доступны `np` = numpy, `cv2` = OpenCV, `math`). Запрещены файлы, сеть, `os`, `sys`, `subprocess`, `open`, `eval`, `exec`.
 3. Обязательно функция `def render(fr, t, dur):` — рисует ОДИН кадр:
    - `fr` — numpy-массив {fh}×{fw}×3 (высота×ширина), RGB, uint8. Рисовать прямо в него (изменять на месте), ничего не возвращать.
@@ -249,7 +250,7 @@ def static_check(code):
                 root = m.split('.')[0]
                 if root in FORBIDDEN_MODULES:
                     errors.append('Запрещённый импорт «%s» (строка %d)' % (m, node.lineno))
-                elif m not in ALLOWED_MODULES and root not in ALLOWED_MODULES and not m.startswith(ALLOWED_PREFIXES):
+                elif m not in ALLOWED_MODULES and root not in ALLOWED_MODULES and m != 'lib' and not m.startswith(ALLOWED_PREFIXES):
                     warnings.append('Необычный импорт «%s» (строка %d)' % (m, node.lineno))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_CALLS:
             errors.append('Запрещённый вызов %s() (строка %d)' % (node.func.id, node.lineno))

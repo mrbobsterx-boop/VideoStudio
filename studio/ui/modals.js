@@ -351,22 +351,64 @@ $('amBtn').onclick = openAutomontage;
 
 // ================================================================== проекты
 const FMT_LABEL = { '16:9': '16:9 горизонтальный', '9:16': '9:16 вертикальный', '1:1': '1:1 квадрат' };
+
+// Открыть проект: для незнакомого проекта (zip, папка из другого места, первый раз) — предупреждение про код
+async function confirmAndOpen(info, body) {
+  if (!info || info.cancel) return;
+  if (info.error) return toast('Ошибка: ' + esc(info.error));
+  if (info.too_old) return toast(`Проекту нужна версия VideoStudio ${esc(info.editor_min)}, у вас ${esc(info.editor)}. Обновите программу и откройте снова.`, 9000);
+  if (!info.known) {
+    const lib = info.lib && info.lib.length ? `\nМодули стиля (папка lib): ${info.lib.join(', ')}` : '';
+    const where = info.imported ? `\nРаспакован в: ${info.path}` : `\nПапка: ${info.path}`;
+    const skipped = info.skipped ? `\nФайлов вне папки проекта пропущено: ${info.skipped}` : '';
+    const ok = confirm(`Открыть проект «${info.title}»?\n\nСцен: ${info.scenes}, длина ${Math.floor(info.duration / 60)}:${String(Math.round(info.duration % 60)).padStart(2, '0')}` +
+      `\nФайлов с кодом Python: ${info.py}${lib}${where}${skipped}` +
+      `\n\nВНИМАНИЕ: код сцен выполняется на этом компьютере. Открывайте только свои проекты или проекты из надёжных источников.`);
+    if (!ok) {
+      if (info.imported) { await api.post('/api/projects/discard', { id: info.id }); toast('Отменено — распакованная папка удалена'); }
+      return;
+    }
+  }
+  await X.flushDraft();
+  if (body) body.insertAdjacentHTML('beforeend', '<p class="mnote"><i class="spinner" style="display:inline-block;vertical-align:-2px"></i> Открываю проект…</p>');
+  const res = await api.post('/api/projects/open', { id: info.id, trust: true });
+  if (res.error) return toast('Ошибка: ' + esc(res.error));
+  location.reload();
+}
+
 async function openProjects() {
   const body = X.openModal('Проекты', '');
   body.innerHTML = '<p class="mnote">Загружаю список…</p>';
   const r = await api.get('/api/projects');
   const items = r.items || [];
   let fmt = '16:9';
-  body.innerHTML = `<div class="mgrid" style="grid-template-columns:1.4fr 1fr">
-   <div class="mcol"><h4>Ваши ролики</h4>
-    <div class="lib-grid">${items.map(p => `<div class="lcard2 proj ${p.current ? 'cur' : ''}" data-id="${esc(p.id)}">
+  const card = p => p.kind === 'zip'
+    ? `<div class="lcard2 proj zip" data-id="${esc(p.id)}">
+      <div class="lth"><span class="nocover">${icon('folder')}</span></div>
+      <div class="linfo"><b>${esc(p.title)}</b><span>zip-архив · ${(p.size / 1048576).toFixed(1)} МБ</span>
+        <span><b class="curtag">нажмите — распаковать и открыть</b></span></div></div>`
+    : `<div class="lcard2 proj ${p.current ? 'cur' : ''}" data-id="${esc(p.id)}">
       <div class="lth" style="${p.cover ? `background-image:url('/api/projects/cover?id=${encodeURIComponent(p.id)}&v=${p.mtime}')` : ''}">${p.cover ? '' : '<span class="nocover">' + icon('film') + '</span>'}</div>
       <div class="linfo"><b>${esc(p.title)}</b>
         <span>${esc(FMT_LABEL[p.format] || p.format)} · сцен: ${p.scenes} · ${Math.floor(p.duration / 60)}:${String(Math.round(p.duration % 60)).padStart(2, '0')}</span>
-        <span>${p.current ? '<b class="curtag">открыт сейчас</b>' : 'изменён ' + fmtDate(p.mtime)}</span>
-        <span class="ppath">${esc(p.id)}</span></div></div>`).join('')}</div>
+        <span>${p.current ? '<b class="curtag">открыт сейчас</b>' : (p.known ? 'изменён ' + fmtDate(p.mtime) : 'ещё не открывали')}</span>
+        <span class="ppath">${esc(p.id)}</span></div></div>`;
+  body.innerHTML = `<div class="mgrid" style="grid-template-columns:1.4fr 1fr">
+   <div class="mcol"><h4>Ваши ролики</h4>
+    <div class="lib-grid">${items.map(card).join('')}</div>
+    <p class="mnote">Сюда попадают проекты из папки <b>projects</b> рядом с программой. Положили туда папку проекта или
+      zip-архив — он появится в этом списке.</p>
    </div>
    <div class="mcol">
+    <h4>Открыть проект</h4>
+    <p class="mnote" style="margin:0">Папка проекта (где лежит project.json) или zip-архив с проектом. Zip распаковывается в папку
+      <b>projects</b> и сразу открывается. Можно перетащить zip в это окно.</p>
+    <div class="mrow"><button class="secondary" id="opDir">${icon('folder')}Папка…</button>
+      <button class="secondary" id="opZip">${icon('folder')}Zip-архив…</button>
+      <input type="file" id="opZipFile" accept=".zip,application/zip" style="display:none"></div>
+    <div class="mrow"><input class="mfield" id="opPath" placeholder="или вставьте путь: D:\\Видео\\мой-проект или …\\проект.zip" style="flex:1">
+      <button class="secondary" id="opPathGo">Открыть</button></div>
+    <p class="mnote" id="opStatus"></p>
     <h4>Новый проект</h4>
     <label class="mnote">Название<input class="mfield" id="npTitle" placeholder="Например: Трейлер для Steam"></label>
     <div class="mnote">Формат кадра</div>
@@ -375,13 +417,15 @@ async function openProjects() {
       <button class="style-card" data-fmt="9:16"><b>9:16</b><span>Reels, Shorts, TikTok</span></button>
       <button class="style-card" data-fmt="1:1"><b>1:1</b><span>квадрат, лента</span></button></div>
     <div class="mrow"><button class="solid-accent" id="npGo" style="padding:9px 16px;border-radius:8px">${icon('plus')}Создать и открыть</button></div>
-    <p class="mnote">Новый проект — пустой ролик с одной сценой-титром. Шрифты копируются, картинки и видео добавьте во вкладке «Медиа».
-      Библиотека сцен общая для всех проектов.</p>
+    <p class="mnote">Новый проект — пустой ролик с одной сценой-титром, без кинополос, виньетки и фонового гула (включаются в «Настройках»).
+      Шрифты копируются, картинки и видео добавьте во вкладке «Медиа». Свои общие модули стиля кладите в папку <b>lib</b> проекта.</p>
     <h4>Копия текущего</h4>
     <p class="mnote" style="margin:0">Скопировать весь открытый ролик (сцены, слои, медиа) в новый проект — удобно, чтобы сделать другую версию.</p>
     <div class="mrow"><button class="secondary" id="npDup">${icon('copy')}Сделать копию и открыть</button></div>
     <p class="mnote">Все проекты сохраняются сами. При следующем запуске программы откроется последний проект.</p>
    </div></div>`;
+  const status = t => { $('opStatus').innerHTML = t ? `<i class="spinner" style="display:inline-block;vertical-align:-2px"></i> ${t}` : ''; };
+  const run = async (promise, msg) => { status(msg); const info = await promise; status(''); await confirmAndOpen(info, body); };
   $('npFmt').onclick = e => { const b = e.target.closest('[data-fmt]'); if (!b) return; fmt = b.dataset.fmt; $('npFmt').querySelectorAll('[data-fmt]').forEach(x => x.classList.toggle('on', x === b)); };
   const go = async (url, payload, msg) => {
     await X.flushDraft();
@@ -392,9 +436,26 @@ async function openProjects() {
   };
   $('npGo').onclick = () => go('/api/projects/new', { title: $('npTitle').value || 'Новый ролик', format: fmt }, 'Создаю проект…');
   $('npDup').onclick = () => go('/api/projects/duplicate', {}, 'Копирую проект…');
-  body.querySelector('.lib-grid').onclick = e => {
+  $('opDir').onclick = () => run(api.post('/api/projects/pick', { kind: 'dir' }), 'Выберите папку в открывшемся окне (оно может быть за браузером)…');
+  $('opZip').onclick = () => $('opZipFile').click();
+  const uploadZip = f => {
+    if (!f) return;
+    if (!/\.zip$/i.test(f.name)) return toast('Нужен zip-архив');
+    run(api.upload('/api/projects/upload?name=' + encodeURIComponent(f.name), f,
+      k => status(`Загружаю и распаковываю ${esc(f.name)}… ${Math.round(k * 100)}%`)), 'Загружаю ' + esc(f.name) + '…');
+  };
+  $('opZipFile').onchange = e => uploadZip(e.target.files[0]);
+  $('opPathGo').onclick = () => run(api.post('/api/projects/inspect', { path: $('opPath').value }), 'Открываю…');
+  body.ondragover = e => { e.preventDefault(); };
+  body.ondrop = e => { e.preventDefault(); const f = e.dataTransfer.files && e.dataTransfer.files[0]; uploadZip(f); };
+  body.querySelector('.lib-grid').onclick = async e => {
     const c = e.target.closest('.proj'); if (!c || c.classList.contains('cur')) return;
-    go('/api/projects/open', { id: c.dataset.id }, 'Открываю проект…');
+    if (c.classList.contains('zip')) return run(api.post('/api/projects/unzip', { id: c.dataset.id }), 'Распаковываю…');
+    await X.flushDraft();
+    const res = await api.post('/api/projects/open', { id: c.dataset.id });
+    if (res.error) return toast('Ошибка: ' + esc(res.error));
+    if (res.need_confirm) return confirmAndOpen(res, body);
+    location.reload();
   };
 }
 $('projBtn').onclick = openProjects;
