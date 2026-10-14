@@ -17,9 +17,11 @@ if [ ! -x .venv/bin/python ]; then
 fi
 .venv/bin/python run.py "$@"
 code=$?
-if [ $code -eq 137 ] || [ $code -eq 9 ]; then
+if [ $code -eq 137 ] || [ $code -eq 143 ] || [ $code -eq 9 ] || [ $code -eq 15 ]; then
   echo
-  echo "Программу закрыла система: не хватило оперативной памяти (в консоли «Убито» / «Killed»)."
+  echo "Программу закрыла система (код $code; в консоли «Убито»/«Завершено» / «Killed»/«Terminated»)."
+  echo "Чаще всего — не хватило памяти: заполнен swap или мало свободной RAM (проверить: free -h)."
   echo "Закройте лишние программы или запустите с меньшим числом потоков:  bash $0 --workers 2"
   read -n 1 -s -r -p "Нажмите любую клавишу…"
 fi
+exit $code
