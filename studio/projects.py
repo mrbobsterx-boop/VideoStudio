@@ -139,7 +139,7 @@ def create(title, fmt='16:9', fonts_from=None):
         f.write(code)
     p = dict(title=title, fps=30, format=fmt,
              look=dict(letterbox=False, vignette=False, grain=0.0, hits=True),
-             audio=dict(generated=True, ambience=False, generated_volume=1.0, music_file=None, music_volume=0.8,
+             audio=dict(generated=False, ambience=False, generated_volume=1.0, music_file=None, music_volume=0.8,
                         music_offset=0, fade_out=1.5),
              scenes=[dict(id='s' + os.urandom(3).hex(), file='intro.py', name='Intro', dur=3.0, layers=[], fx=[])],
              texts=dict(intro_title=title.upper(), intro_sub=''), fonts={})
