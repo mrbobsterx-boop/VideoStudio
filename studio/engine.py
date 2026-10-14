@@ -340,6 +340,40 @@ def w_sound(task):
     return a.L.astype(np.float32), a.R.astype(np.float32), a.WET.astype(np.float32), err
 
 
+def _trim_stem(L, R, WET):
+    """Звук сцены без тишины по краям: (сдвиг, L, R, WET или None) — в памяти только то, что звучит."""
+    nz = np.flatnonzero((np.abs(L) > 1e-7) | (np.abs(R) > 1e-7) | (np.abs(WET) > 1e-7))
+    if not len(nz):
+        return (0, np.zeros(0, np.float32), np.zeros(0, np.float32), None)
+    a, b = int(nz[0]), int(nz[-1]) + 1
+    w = WET[a:b]
+    # float16 — вдвое меньше памяти; для сведения точности хватает (≈ −66 дБ шума)
+    return (a, L[a:b].astype(np.float16), R[a:b].astype(np.float16),
+            w.astype(np.float16) if np.abs(w).max() > 1e-7 else None)
+
+
+def release_memory():
+    """Вернуть системе освободившуюся память (Linux/glibc держит её у себя после больших расчётов)."""
+    import gc
+    gc.collect()
+    if sys.platform.startswith('linux'):
+        try:
+            import ctypes
+            ctypes.CDLL('libc.so.6').malloc_trim(0)
+        except Exception:
+            pass
+
+
+def write_wav(path, mix, chunk=1 << 20):
+    """WAV 16 бит стерео кусками (без копии всего ролика в памяти)."""
+    import wave
+    with wave.open(path, 'wb') as w:
+        w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR)
+        for c0 in range(0, len(mix), chunk):
+            seg = np.clip(mix[c0:c0 + chunk], -1, 1)
+            w.writeframes((seg * 32767).astype('<i2').tobytes())
+
+
 def w_check(task):
     """Проверка сцены (для ИИ-кода): несколько кадров, время рендера, ошибки."""
     out = []
@@ -620,7 +654,7 @@ def default_workers():
     n = max(1, min((os.cpu_count() or 2) - 1, 6))
     mb = free_memory_mb()
     if mb:
-        n = max(1, min(n, (mb - 1200) // WORKER_MB))
+        n = max(1, min(n, (mb - 2000) // WORKER_MB))      # ~2 ГБ — основному процессу (звук ролика, кэш превью)
     return n
 
 
@@ -1419,16 +1453,11 @@ class Studio:
                 L = R = WET = None
                 err = 'Звук сцены не посчитался (сцена зависла или упала).'
             if L is None:
-                from .sound import TAIL
-                with self.lock:
-                    try:
-                        dur = float(self.scene(sid)['dur'])
-                    except KeyError:
-                        continue
-                m = int((dur + TAIL) * SR)
-                L = R = WET = np.zeros(m, np.float32)
+                stem = (0, np.zeros(0, np.float32), np.zeros(0, np.float32), None)
+            else:
+                stem = _trim_stem(L, R, WET)
             with self.lock:
-                self._stems[sid] = (key, (L, R, WET))
+                self._stems[sid] = (key, stem)
                 if err:
                     self.errors[sid] = err
         with self.lock:
@@ -1444,7 +1473,7 @@ class Studio:
             return None
         m = self.music_samples(path)
         off = int(float(a.get('music_offset', 0)) * SR)
-        out = np.zeros((n, 2))
+        out = np.zeros((n, 2), np.float32)
         if off >= 0:
             src = m[:max(0, n - off)]
             out[off:off + len(src)] = src
@@ -1458,7 +1487,7 @@ class Studio:
         if not self._music or self._music[0] != key:
             cmd = [self.ffmpeg, '-v', 'error', '-i', path, '-f', 'f32le', '-ac', '2', '-ar', str(SR), '-']
             raw = subprocess.run(cmd, capture_output=True).stdout
-            m = np.frombuffer(raw[:len(raw) // 8 * 8], np.float32).reshape(-1, 2).astype(np.float64)
+            m = np.frombuffer(raw[:len(raw) // 8 * 8], np.float32).reshape(-1, 2).copy()
             self._music = (key, m)
         return self._music[1]
 
@@ -1494,13 +1523,14 @@ class Studio:
                 if j <= i:
                     continue
                 if out is None:
-                    out = np.zeros((N, 2))
+                    out = np.zeros((N, 2), np.float32)
                 out[i:j] += a[:j - i]
         return out
 
     def mix_audio(self):
+        """Звук всего ролика, стерео float32 (N, 2). Считается кусками по ~20 с: даже для ролика на 20+ минут
+        нужно лишь несколько сотен МБ памяти (раньше — гигабайты: float64-массивы на весь ролик)."""
         from .sound import lp, TAIL
-        from scipy.signal import fftconvolve
         tl, total = self.timeline()
         with self.lock:
             fps = self.p['fps']
@@ -1510,7 +1540,10 @@ class Studio:
         dur = total / fps
         N = int(dur * SR)
         M = N + int(TAIL * SR)
-        L = np.zeros(M); R = np.zeros(M); WET = np.zeros(M)
+        mix = np.zeros((M, 2), np.float32)          # L и R — столбцы одного массива (без лишней копии в конце)
+        L = mix[:, 0]; R = mix[:, 1]
+        WET = None
+        CH = 20 * SR
         gen_on = acfg.get('generated', True)
         if gen_on and N > 0:
             stems = self._stems_for(tl)
@@ -1518,65 +1551,121 @@ class Studio:
                 st = stems.get(s['id'])
                 if st is None:
                     continue
-                sl, sr, sw = st
-                i = int(f0 / fps * SR)
+                off, sl, sr, sw = st
+                i = int(f0 / fps * SR) + off
                 j = min(M, i + len(sl))
-                L[i:j] += sl[:j - i]; R[i:j] += sr[:j - i]; WET[i:j] += sw[:j - i]
-            # фоновый гул и ветер (выключаются в Настройках: «Фоновый гул и ветер»)
-            amb_on = acfg.get('ambience', True)
-            pts_a, pts_w = [], []
-            prev_a, prev_w = 0.4, 0.3
-            for s, f0, n in tl:
-                m = metas.get(s['id'], {})
-                t0, t1 = f0 / fps, (f0 + n) / fps
-                aa = m.get('amb') or (prev_a, prev_a)
-                ww = m.get('wind') or (prev_w, prev_w)
-                pts_a += [(t0 + 0.001, aa[0]), (t1 - 0.001, aa[1])]
-                pts_w += [(t0 + 0.001, ww[0]), (t1 - 0.001, ww[1])]
-                prev_a, prev_w = aa[1], ww[1]
-            t = np.arange(M) / SR
-            auto = np.interp(t, [p[0] for p in pts_a], [p[1] for p in pts_a])
-            wauto = np.interp(t, [p[0] for p in pts_w], [p[1] for p in pts_w])
-            auto[N:] *= np.exp(-(t[N:] - dur) * 6)
-            wauto[N:] *= np.exp(-(t[N:] - dur) * 6)
-            dr = (np.sin(2 * np.pi * 36.71 * t) * 0.5 + np.sin(2 * np.pi * 55 * t + 1) * 0.3 +
-                  np.sin(2 * np.pi * 73.42 * t) * 0.25) * (0.75 + 0.25 * np.sin(2 * np.pi * 0.13 * t))
-            rng = np.random.default_rng(3)
-            wind = lp(rng.standard_normal(M), 380, 2) * (0.6 + 0.4 * np.sin(2 * np.pi * 0.21 * t + 2)) * 1.2
-            if amb_on:
-                L += dr * auto * 0.28 + wind * wauto * 0.25
-                R += dr * auto * 0.28 + wind * wauto * 0.25 * 0.9
-            # reverb
-            if np.abs(WET).max() > 0:
+                if j <= i:
+                    continue
+                L[i:j] += sl[:j - i]; R[i:j] += sr[:j - i]
+                if sw is not None:
+                    WET = WET or []
+                    WET.append((i, sw))
+            # фоновый гул и ветер (выключаются в Настройках: «Фоновый гул и ветер») — кусками
+            if acfg.get('ambience', True):
+                pts_a, pts_w = [], []
+                prev_a, prev_w = 0.4, 0.3
+                for s, f0, n in tl:
+                    m = metas.get(s['id'], {})
+                    t0, t1 = f0 / fps, (f0 + n) / fps
+                    aa = m.get('amb') or (prev_a, prev_a)
+                    ww = m.get('wind') or (prev_w, prev_w)
+                    pts_a += [(t0 + 0.001, aa[0]), (t1 - 0.001, aa[1])]
+                    pts_w += [(t0 + 0.001, ww[0]), (t1 - 0.001, ww[1])]
+                    prev_a, prev_w = aa[1], ww[1]
+                xa, ya = [p[0] for p in pts_a], [p[1] for p in pts_a]
+                xw, yw = [p[0] for p in pts_w], [p[1] for p in pts_w]
+                rng = np.random.default_rng(3)
+                zi = None
+                from scipy.signal import sosfilt, sosfilt_zi
+                from .sound import _sos
+                sos = _sos('low', 380, 2)
+                for c0 in range(0, M, CH):
+                    c1 = min(M, c0 + CH)
+                    t = np.arange(c0, c1) / SR
+                    auto = np.interp(t, xa, ya)
+                    wauto = np.interp(t, xw, yw)
+                    tail = t > dur
+                    if tail.any():
+                        auto[tail] *= np.exp(-(t[tail] - dur) * 6)
+                        wauto[tail] *= np.exp(-(t[tail] - dur) * 6)
+                    dr = (np.sin(2 * np.pi * 36.71 * t) * 0.5 + np.sin(2 * np.pi * 55 * t + 1) * 0.3 +
+                          np.sin(2 * np.pi * 73.42 * t) * 0.25) * (0.75 + 0.25 * np.sin(2 * np.pi * 0.13 * t))
+                    noise = rng.standard_normal(c1 - c0)
+                    if zi is None:
+                        zi = sosfilt_zi(sos) * 0.0
+                    wn, zi = sosfilt(sos, noise, zi=zi)
+                    wind = wn * (0.6 + 0.4 * np.sin(2 * np.pi * 0.21 * t + 2)) * 1.2
+                    L[c0:c1] += (dr * auto * 0.28 + wind * wauto * 0.25).astype(np.float32)
+                    R[c0:c1] += (dr * auto * 0.28 + wind * wauto * 0.25 * 0.9).astype(np.float32)
+            # реверберация (только если в сценах есть «мокрый» звук): свёртка по кускам каждой сцены
+            if WET:
+                rng = np.random.default_rng(3)
                 tI = np.arange(int(2.8 * SR)) / SR
                 ir = rng.standard_normal(len(tI)) * np.exp(-tI / 0.7)
                 ir = lp(ir, 4000)
-                ir /= np.sqrt((ir ** 2).sum())
-                rev = fftconvolve(WET, ir)[:M] * 0.5
-                L += rev
-                R += np.roll(rev, int(0.013 * SR))
-        mix = np.stack([L, R], 1)[:N]
-        peak = float(np.percentile(np.abs(mix), 99.97)) if N else 0
-        if peak > 1e-6:
-            mix = np.tanh(mix / peak * 1.6) / np.tanh(1.6) * 0.89
-        mix *= float(acfg.get('generated_volume', 1.0))
+                ir = (ir / np.sqrt((ir ** 2).sum())).astype(np.float32)
+                from scipy import fft as sfft
+                nfft = 1 << 19
+                seg = nfft - len(ir) + 1
+                H = sfft.rfft(ir, nfft)
+                sh = int(0.013 * SR)
+                for i0, sw in WET:
+                    for c0 in range(0, len(sw), seg):
+                        x = sw[c0:c0 + seg].astype(np.float32)
+                        if not x.any():
+                            continue
+                        y = sfft.irfft(sfft.rfft(x, nfft) * H, nfft).astype(np.float32) * 0.5
+                        a0 = i0 + c0
+                        a1 = min(M, a0 + nfft)
+                        if a1 > a0:
+                            L[a0:a1] += y[:a1 - a0]
+                        r0, r1 = a0 + sh, min(M, a0 + sh + nfft)
+                        if r1 > r0:
+                            R[r0:r1] += y[:r1 - r0]
+                WET = None
+        mix = mix[:N]
+        L = mix[:, 0]; R = mix[:, 1]
+        if N:
+            sample = np.abs(mix[::7].ravel())
+            peak = float(np.percentile(sample, 99.97)) if len(sample) else 0
+            del sample
+        else:
+            peak = 0
+        gv = float(acfg.get('generated_volume', 1.0))
+        norm = peak > 1e-6
+        for X in (L, R):
+            for c0 in range(0, N, CH):
+                seg = X[c0:c0 + CH]
+                if norm:
+                    np.tanh(seg / peak * 1.6, out=seg)
+                    seg *= 0.89 / np.tanh(1.6)
+                seg *= gv
         extra = False
         mus = self._music_track(N)
         if mus is not None:
-            mix = mix + mus * float(acfg.get('music_volume', 0.8))
+            mv = float(acfg.get('music_volume', 0.8))
+            L += mus[:, 0] * mv; R += mus[:, 1] * mv
+            del mus
             extra = True
         with self.lock:
             vtl = [(s, f0, n) for s, f0, n in tl]
         va = self._video_audio(vtl, fps, N)
         if va is not None:
-            mix = mix + va
+            L += va[:, 0]; R += va[:, 1]
+            del va
             extra = True
         if extra:
-            mix = np.tanh(mix * 1.05) / np.tanh(1.05)
+            k = 1 / np.tanh(1.05)
+            for X in (L, R):
+                for c0 in range(0, N, CH):
+                    seg = X[c0:c0 + CH]
+                    np.tanh(seg * 1.05, out=seg)
+                    seg *= k
         fo = float(acfg.get('fade_out', 1.5))
         if fo > 0 and N > 0:
             k = min(N, int(fo * SR))
-            mix[N - k:] *= np.linspace(1, 0, k)[:, None]
+            ramp = np.linspace(1, 0, k, dtype=np.float32)
+            L[N - k:] *= ramp; R[N - k:] *= ramp
         return mix
 
     def _audio_loop(self):
@@ -1597,7 +1686,7 @@ class Studio:
                 cdir = os.path.join(self.dir, '.cache')
                 os.makedirs(cdir, exist_ok=True)
                 path = os.path.join(cdir, 'audio_%d.wav' % (self.audio_ver + 1))
-                wavfile.write(path, SR, (np.clip(mix, -1, 1) * 32767).astype(np.int16))
+                write_wav(path, mix)
                 self._audio_file = path
                 for f in os.listdir(cdir):          # убрать старые версии (если не заняты)
                     if f.startswith('audio_') and f.endswith('.wav') and os.path.join(cdir, f) != path:
@@ -1607,14 +1696,15 @@ class Studio:
                             pass
                 n = 3000
                 if len(mix):
-                    mono = np.abs(mix).max(1)
-                    k = max(1, len(mono) // n)
-                    pk = mono[:k * (len(mono) // k)].reshape(-1, k).max(1)
+                    k = max(1, len(mix) // n)
+                    pk = np.array([float(np.abs(mix[i:i + k]).max()) for i in range(0, k * (len(mix) // k), k)])
                     self.audio_peaks = [round(float(x), 3) for x in pk]
                     self.audio_peaks_rate = SR / k
                 else:
                     self.audio_peaks = []
                     self.audio_peaks_rate = 1
+                del mix
+                release_memory()
                 self.audio_ver += 1
                 self.audio_state = 'ready'
             except Exception:
@@ -1795,7 +1885,7 @@ class Studio:
             st['msg'] = 'Сборка файла…'
             from scipy.io import wavfile
             wav = os.path.join(tmpd, 'audio.wav')
-            wavfile.write(wav, SR, (np.clip(mix, -1, 1) * 32767).astype(np.int16))
+            write_wav(wav, mix)
             lst = os.path.join(tmpd, 'list.txt')
             with open(lst, 'w') as f:
                 for j in jobs:
