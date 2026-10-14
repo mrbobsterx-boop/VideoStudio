@@ -581,6 +581,49 @@ def sound(a, dur):
 # =====================================================================================
 #  main process
 # =====================================================================================
+WORKER_MB = 700          # примерно столько памяти может занять один процесс рендера (картинки, видео, кэши)
+
+
+def free_memory_mb():
+    """Сколько оперативной памяти доступно (МБ); None — если узнать не удалось."""
+    try:
+        if sys.platform.startswith('linux'):
+            with open('/proc/meminfo') as f:
+                for ln in f:
+                    if ln.startswith('MemAvailable:'):
+                        return int(ln.split()[1]) // 1024
+        elif os.name == 'nt':
+            import ctypes
+
+            class MS(ctypes.Structure):
+                _fields_ = [('l', ctypes.c_ulong), ('load', ctypes.c_ulong), ('tot', ctypes.c_ulonglong),
+                            ('avail', ctypes.c_ulonglong), ('tp', ctypes.c_ulonglong), ('ap', ctypes.c_ulonglong),
+                            ('tv', ctypes.c_ulonglong), ('av', ctypes.c_ulonglong), ('ae', ctypes.c_ulonglong)]
+            m = MS()
+            m.l = ctypes.sizeof(MS)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+                return int(m.avail // (1 << 20))
+        elif sys.platform == 'darwin':
+            out = subprocess.run(['vm_stat'], capture_output=True, text=True, timeout=5).stdout
+            page = 4096
+            free = sum(int(ln.split(':')[1].strip(' .')) for ln in out.splitlines()
+                       if ln.startswith(('Pages free', 'Pages inactive', 'Pages speculative')))
+            return free * page // (1 << 20)
+    except Exception:
+        pass
+    return None
+
+
+def default_workers():
+    """Сколько процессов рендера: по ядрам, но не больше, чем позволяет свободная память
+    (иначе система убивает программу — в консоли «Убито» / «Killed»). Свой выбор: run.py --workers N."""
+    n = max(1, min((os.cpu_count() or 2) - 1, 6))
+    mb = free_memory_mb()
+    if mb:
+        n = max(1, min(n, (mb - 1200) // WORKER_MB))
+    return n
+
+
 class Studio:
     def __init__(self, project_dir, workers=None):
         self.dir = os.path.abspath(project_dir)
@@ -617,7 +660,7 @@ class Studio:
         kit.ASSET_DIRS = project_dirs(self.dir, 'assets')
         kit.FONT_DIRS = project_dirs(self.dir, 'fonts')
         kit.set_frame(*self.size)
-        n = workers or max(1, min((os.cpu_count() or 2) - 1, 6))
+        n = workers or default_workers()
         self.nworkers = n
         self.pool = self._new_pool()
         threading.Thread(target=self._scheduler, daemon=True).start()

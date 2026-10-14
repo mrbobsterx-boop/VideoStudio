@@ -307,7 +307,7 @@ def bold(fr, t, t0, t1, s, cy=None, size=150, cx=None, color=CREAM, track=0.08, 
 
 
 # ================================================================ images
-_IMG = _LRU(max_bytes=700 << 20)
+_IMG = _LRU(max_bytes=300 << 20)       # на каждый процесс рендера — держим память в узде
 IMG_EXTS = ('', '.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif', '.HEIC', '.JPG')
 
 try:                          # фото с iPhone (.HEIC) — если установлен pillow-heif
@@ -552,7 +552,7 @@ def _glow(key, draw, sigma):
         draw(sm, q)
         sm = cv2.GaussianBlur(sm, (0, 0), max(0.5, sigma / q))
         g = cv2.resize(sm, (W, H), interpolation=cv2.INTER_LINEAR)
-        if len(_GLOW) > 60:
+        if len(_GLOW) > 12:
             _GLOW.clear()
         _GLOW[key] = g
     return g

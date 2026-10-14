@@ -15,4 +15,11 @@ if [ ! -x .venv/bin/python ]; then
     read -n 1 -s -r -p "Нажмите любую клавишу…"; exit 1
   fi
 fi
-.venv/bin/python run.py
+.venv/bin/python run.py "$@"
+code=$?
+if [ $code -eq 137 ] || [ $code -eq 9 ]; then
+  echo
+  echo "Программу закрыла система: не хватило оперативной памяти (в консоли «Убито» / «Killed»)."
+  echo "Закройте лишние программы или запустите с меньшим числом потоков:  bash $0 --workers 2"
+  read -n 1 -s -r -p "Нажмите любую клавишу…"
+fi
