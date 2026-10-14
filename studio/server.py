@@ -771,6 +771,38 @@ def free_port(start):
     return start
 
 
+def _log_signals():
+    """Если программу останавливает система или другая программа (SIGTERM / SIGHUP) — написать об этом
+    в консоли вместе с памятью в этот момент, сохранить проект и выйти, а не исчезать молча."""
+    import signal
+    import time as _t
+
+    def handler(signum, frame):
+        name = {getattr(signal, 'SIGTERM', -1): 'SIGTERM (завершить)', getattr(signal, 'SIGHUP', -1): 'SIGHUP (закрыт терминал)'}.get(signum, str(signum))
+        mem = ''
+        try:
+            with open('/proc/meminfo') as f:
+                info = {ln.split(':')[0]: int(ln.split()[1]) // 1024 for ln in f}
+            mem = ' | свободно RAM %d МБ, swap занят %d из %d МБ' % (
+                info.get('MemAvailable', 0), info.get('SwapTotal', 0) - info.get('SwapFree', 0), info.get('SwapTotal', 0))
+        except Exception:
+            pass
+        print('\n  [%s] Программу остановил сигнал %s — её закрыла система или другая программа%s'
+              % (_t.strftime('%H:%M:%S'), name, mem), flush=True)
+        try:
+            if S is not None:
+                S.save(now=True)
+                S.shutdown()
+        finally:
+            os._exit(128 + signum)
+    for sig in ('SIGTERM', 'SIGHUP'):
+        if hasattr(signal, sig):
+            try:
+                signal.signal(getattr(signal, sig), handler)
+            except (ValueError, OSError):
+                pass
+
+
 def main():
     global S, PORT
     ap = argparse.ArgumentParser(description='Shelter Studio')
@@ -780,6 +812,7 @@ def main():
     ap.add_argument('--workers', type=int, default=0)
     ap.add_argument('--no-browser', action='store_true')
     a = ap.parse_args()
+    _log_signals()
     if not a.project:
         a.project = projects.last_project() or os.path.join(projects.ROOT, 'project')
     if not os.path.isfile(os.path.join(a.project, 'project.json')):
