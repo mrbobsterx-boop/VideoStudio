@@ -318,14 +318,31 @@ except Exception:
 VID_EXTS = ('.mp4', '.mov', '.webm', '.mkv', '.m4v', '.avi')
 
 
-def _path(name, exts=IMG_EXTS, what='Картинка'):
-    for d in (ASSET_DIRS or [os.path.join(PROJECT, 'assets')]):
+def _roots(name):
+    """Где искать файл: 'cache/…' — результаты «Подготовки» в <проект>/cache/, 'assets/…' и просто имя — assets/."""
+    n = str(name).replace('\\', '/').lstrip('/')
+    if '..' in n.split('/'):
+        raise ValueError("Путь '%s': выходить из папки проекта нельзя" % name)
+    if n.startswith('cache/'):
+        return [os.path.join(PROJECT, 'cache')], n[6:]
+    if n.startswith('assets/'):
+        n = n[7:]
+    return (ASSET_DIRS or [os.path.join(PROJECT, 'assets')]), n
+
+
+def _path(name, exts=IMG_EXTS, what='Картинка', dirs_ok=False):
+    roots, n = _roots(name)
+    for d in roots:
         for ext in exts:
-            p = os.path.join(d, name + ext)
+            p = os.path.join(d, n + ext)
             if os.path.isfile(p):
                 ASSETS_USED.add(name)
                 return p
-    raise FileNotFoundError("%s '%s' не найдена в папке assets/" % (what, name))
+        if dirs_ok and os.path.isdir(os.path.join(d, n)):
+            ASSETS_USED.add(name)
+            return os.path.join(d, n)
+    where = 'cache/ (нажмите «Подготовка»)' if str(name).startswith('cache/') else 'assets/'
+    raise FileNotFoundError("%s '%s' не найдена в папке %s" % (what, name, where))
 
 
 def _mt(p):
@@ -400,8 +417,11 @@ def video(name, t, start=0.0, speed=1.0, loop=True, sat=1.0, con=1.0, bright=1.0
     start — с какой секунды файла начать (подрезка), speed — скорость, loop — зациклить.
     Дальше кадр используется как картинка: cover(fr, video('beach', t)) или kb(fr, video(...), ...)."""
     from . import media
-    p = _path(name, VID_EXTS, 'Видео')
-    a = media.frame_at(p, start + max(0.0, t) * speed, loop)
+    p = _path(name, VID_EXTS, 'Видео', dirs_ok=True)
+    if os.path.isdir(p):
+        a = _seq_frame(p, start + max(0.0, t) * speed, loop)     # кадры PNG (Manim, «Подготовка») — с прозрачностью
+    else:
+        a = media.frame_at(p, start + max(0.0, t) * speed, loop)
     if (sat, con, bright, tuple(tint)) != (1.0, 1.0, 1.0, (1, 1, 1)):
         a = _grade(a, sat, con, bright, tint)
     if blur:
@@ -412,7 +432,49 @@ def video(name, t, start=0.0, speed=1.0, loop=True, sat=1.0, con=1.0, bright=1.0
 def video_info(name):
     """Длина и размер видео: dict(w, h, fps, frames, dur)."""
     from . import media
-    return media.info(_path(name, VID_EXTS, 'Видео'))
+    p = _path(name, VID_EXTS, 'Видео', dirs_ok=True)
+    if os.path.isdir(p):
+        files, fps = _seq(p)
+        h, w = (_seq_load(files[0]).shape[:2]) if files else (0, 0)
+        return dict(w=w, h=h, fps=fps, frames=len(files), dur=round(len(files) / fps, 3))
+    return media.info(p)
+
+
+_SEQ = _LRU(max_items=32)
+
+
+def _seq(d):
+    """Папка с кадрами PNG: (список файлов по порядку, fps из meta.json или 30)."""
+    k = (d, os.path.getmtime(d))
+    v = _SEQ.get(k)
+    if v is None:
+        files = sorted(os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith(('.png', '.jpg', '.webp')))
+        fps = 30.0
+        try:
+            import json
+            with open(os.path.join(d, 'meta.json'), 'r', encoding='utf-8') as f:
+                fps = float(json.load(f).get('fps', 30)) or 30.0
+        except (OSError, ValueError):
+            pass
+        v = _SEQ.put(k, (files, fps))
+    return v
+
+
+def _seq_load(p):
+    key = ('seq', p, _mt(p))
+    a = _IMG.get(key)
+    if a is None:
+        a = _IMG.put(key, np.array(Image.open(p).convert('RGBA')))
+    return a
+
+
+def _seq_frame(d, t, loop=True):
+    files, fps = _seq(d)
+    if not files:
+        raise FileNotFoundError("В папке '%s' нет кадров" % os.path.basename(d))
+    i = int(max(0.0, t) * fps + 1e-6)
+    i = i % len(files) if loop else min(i, len(files) - 1)
+    return _seq_load(files[i])
 
 
 def _area(area):
@@ -624,3 +686,132 @@ def diamond(fr, x, y, r, color, op=1.0):
         ov = fr.copy()
         cv2.fillPoly(ov, [pts], tuple(color), cv2.LINE_AA)
         cv2.addWeighted(ov, op, fr, 1 - op, 0, dst=fr)
+
+
+# ================================================================ 3D-модели (кэш «Подготовки»)
+MODEL_EXTS = ('.glb', '.gltf', '.obj', '.stl', '.ply')
+_NEED = set()            # какие ракурсы этот процесс уже записал в список «нужна Подготовка»
+
+
+def _model_file(name):
+    """assets/models/<имя> (расширение можно не писать); 'models/…' и 'assets/models/…' — тоже."""
+    roots, n = _roots(name)
+    n = n[7:] if n.startswith('models/') else n
+    for d in roots:
+        for sub in ('models', ''):
+            for ext in ('',) + MODEL_EXTS:
+                p = os.path.join(d, sub, n + ext)
+                if os.path.isfile(p) and p.lower().endswith(MODEL_EXTS):
+                    return p
+    return None
+
+
+def model_spec(name, elevation=15.0, zoom=1.0, light='studio', size=None, shadow=True, floor=True, up=None, step=2):
+    """Описание рендера модели (для «Подготовки»): dict + ключ кэша. Без PyVista — только числа."""
+    import hashlib
+    import json
+    p = _model_file(name)
+    if p is None:
+        return None, None
+    size = int(size or max(256, round(min(W, H) * 0.8 / 64) * 64))
+    spec = dict(path=os.path.abspath(p), file=os.path.basename(p), mtime=round(os.path.getmtime(p), 2),
+                bytes=os.path.getsize(p), elevation=round(float(elevation)), zoom=round(float(zoom) * 20) / 20,
+                light=light if isinstance(light, str) else [list(map(list, x[:1])) + list(x[1:]) for x in light],
+                size=size, shadow=bool(shadow), floor=bool(floor), up=up, step=max(1, int(step)))
+    raw = json.dumps({k: v for k, v in spec.items() if k != 'path'}, sort_keys=True, ensure_ascii=False)
+    key = '%s-%s' % (re.sub(r'\W+', '_', os.path.splitext(spec['file'])[0])[:32],
+                     hashlib.sha1((raw + spec['path']).encode('utf-8')).hexdigest()[:10])
+    return spec, key
+
+
+def _model_need(spec, key, ang, orbit):
+    """Записать, какой ракурс нужен (папка cache/models/_need/ — её читает «Подготовка»)."""
+    tag = (key, 'orbit' if orbit else ang)
+    if tag in _NEED:
+        return
+    _NEED.add(tag)
+    import json
+    d = os.path.join(PROJECT, 'cache', 'models', '_need')
+    try:
+        os.makedirs(d, exist_ok=True)
+        sp = os.path.join(d, key + '.json')
+        if not os.path.isfile(sp):
+            tmp = sp + '.%d.tmp' % os.getpid()
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(spec, f, ensure_ascii=False)
+            os.replace(tmp, sp)
+        with open(os.path.join(d, key + '.angles'), 'a', encoding='utf-8') as f:
+            f.write(('orbit' if orbit else str(ang)) + '\n')
+    except OSError:
+        pass
+
+
+_STUB = _LRU(max_items=16)
+
+
+def _model_stub(size, title, hint):
+    """Заглушка вместо модели: рамка, кубик и подсказка — видно, что нужно сделать."""
+    k = (size, title, hint)
+    a = _STUB.get(k)
+    if a is not None:
+        return a
+    a = np.zeros((size, size, 4), np.uint8)
+    m = size // 10
+    cv2.rectangle(a, (m, m), (size - m, size - m), (40, 46, 60, 200), -1)
+    cv2.rectangle(a, (m, m), (size - m, size - m), (120, 140, 180, 255), max(1, size // 300), cv2.LINE_AA)
+    c, r = size // 2, size // 7
+    pts = np.array([[c, c - r], [c + r, c - r // 2], [c + r, c + r // 2], [c, c + r], [c - r, c + r // 2],
+                    [c - r, c - r // 2]], np.int32) - [0, size // 12]
+    cv2.polylines(a, [pts], True, (170, 190, 230, 255), max(2, size // 160), cv2.LINE_AA)
+    cv2.line(a, tuple(pts[0] + [0, r]), tuple(pts[3]), (170, 190, 230, 255), max(2, size // 160), cv2.LINE_AA)
+    cv2.line(a, tuple(pts[0] + [0, r]), tuple(pts[1] + [0, r // 2]), (170, 190, 230, 255), max(2, size // 160), cv2.LINE_AA)
+    cv2.line(a, tuple(pts[0] + [0, r]), tuple(pts[5] + [0, r // 2]), (170, 190, 230, 255), max(2, size // 160), cv2.LINE_AA)
+    im = Image.fromarray(a)
+    d = ImageDraw.Draw(im)
+    try:
+        f1 = ImageFont.truetype(os.path.join(os.path.dirname(__file__), 'fonts', 'JetBrainsMono.ttf'), max(10, size // 18))
+        f2 = ImageFont.truetype(os.path.join(os.path.dirname(__file__), 'fonts', 'JetBrainsMono.ttf'), max(9, size // 30))
+    except Exception:
+        f1 = f2 = ImageFont.load_default()
+    for txt, f, y, col in ((title, f1, c + size // 7, (230, 236, 248, 255)), (hint, f2, c + size // 4, (150, 164, 188, 255))):
+        y0 = y
+        for ln in str(txt).split('\n'):
+            tw = d.textlength(ln, font=f)
+            d.text((c - tw / 2, y0), ln, font=f, fill=col)
+            y0 += int(f.size * 1.3)
+    return _STUB.put(k, np.array(im))
+
+
+def model(name, t=0.0, azimuth=0.0, elevation=15.0, zoom=1.0, light='studio', spin=0.0, size=None, shadow=True,
+          floor=True, up=None, step=2, orbit=None):
+    """3D-модель проекта из assets/models/ (.glb .gltf .obj .stl .ply) — картинка RGBA для place()/blit().
+    Ракурс: azimuth — поворот вокруг вертикали (градусы), spin — градусов в секунду (облёт), elevation — высота
+    камеры; zoom — крупность; light — свет 'studio' / 'soft' / 'warm' / 'cool' / 'dramatic';
+    shadow/floor — мягкая тень на прозрачном полу; up='z', если модель лежит на боку; size — сторона картинки.
+    Рендер (PyVista) делает «Подготовка» один раз и кладёт в cache/models/ — в кадре модель только читается.
+    Пока ракурс не готов, вместо модели — заглушка с подсказкой."""
+    spec, key = model_spec(name, elevation, zoom, light, size, shadow, floor, up, step)
+    sz = int(size or max(256, round(min(W, H) * 0.8 / 64) * 64))
+    if spec is None:
+        return _model_stub(sz, '3D: %s' % os.path.basename(str(name)), 'нет файла в assets/models/')
+    st = spec['step']
+    az = (azimuth + spin * t) % 360
+    ang = int(round(az / st) * st) % 360
+    p = os.path.join(PROJECT, 'cache', 'models', key, 'a%03d.png' % ang)
+    if os.path.isfile(p):
+        ASSETS_USED.add('models/' + spec['file'])
+        k = ('mdl', p, _mt(p))
+        a = _IMG.get(k)
+        if a is None:
+            a = _IMG.put(k, np.array(Image.open(p).convert('RGBA')))
+        return a
+    _model_need(spec, key, ang, bool(spin) if orbit is None else bool(orbit))
+    import importlib.util
+    hint = 'нажмите «Подготовка»' if importlib.util.find_spec('pyvista') else 'нет pyvista — запустите установку'
+    return _model_stub(sz, '3D: %s' % spec['file'], hint)
+
+
+# ================================================================ Skia, код, постобработка (studio/gfx.py)
+from .gfx import *            # noqa: E402,F401,F403
+from . import gfx as _gfx     # noqa: E402
+__all__ += list(_gfx.__all__) + ['model']

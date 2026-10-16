@@ -485,3 +485,13 @@ textarea.mfield { resize: vertical; min-height: 90px; line-height: 1.5; }
 .snd-src.code { color: var(--ok); }
 .mrow > label.filebtn, .mrow > label.chk { flex-direction: row; flex: none; min-width: 0; color: inherit; font-size: inherit; }
 .mrow > label.ghost.filebtn { color: var(--muted); font-size: 12px; }
+
+/* «Подготовка» */
+.hbtn { position: relative; }
+.hbtn .dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: #9aacff; box-shadow: 0 0 0 2px var(--bg, #0b0c12); }
+.prep-list { display: flex; flex-direction: column; gap: 6px; }
+.prep-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12.5px; }
+.prep-row span { margin-left: auto; color: var(--muted); }
+.prep-row em.bad { color: var(--bad); font-style: normal; }
+.prep-log { background: #0d0f13; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: 11.5px/1.5 var(--mono);
+  color: #c9cfdb; max-height: 260px; overflow: auto; margin: 0; white-space: pre-wrap; }

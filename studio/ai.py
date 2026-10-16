@@ -17,7 +17,9 @@ FORBIDDEN_MODULES = {'os', 'sys', 'subprocess', 'shutil', 'socket', 'requests', 
                      'pathlib', 'ctypes', 'multiprocessing', 'threading', 'asyncio', 'importlib', 'pickle',
                      'webbrowser', 'smtplib', 'glob', 'tempfile', 'signal'}
 FORBIDDEN_CALLS = {'open', 'exec', 'eval', '__import__', 'compile', 'input', 'exit', 'quit', 'globals', 'breakpoint'}
-ALLOWED_MODULES = {'studio.kit', 'math', 'random', 'numpy', 'cv2', 'colorsys', 'itertools', 'functools'}
+ALLOWED_MODULES = {'studio.kit', 'math', 'random', 'numpy', 'cv2', 'colorsys', 'itertools', 'functools',
+                   'skia', 'pyvista', 'trimesh', 'pygments', 'fontTools'}
+HEAVY_MODULES = {'pyvista', 'trimesh'}   # можно, но рендер 3D в кадре медленный — для этого model() и «Подготовка»
 ALLOWED_PREFIXES = ('lib.',)   # модули стиля из папки lib/ самого проекта
 
 
@@ -43,6 +45,12 @@ def api_reference():
                               'blit', 'card']),
         ('Эффекты кадра', ['fill', 'darkbg', 'dim', 'blur', 'grayscale', 'shade_bottom', 'glow_circle', 'glow_ellipse',
                            'dust', 'embers', 'diamond', 'effect']),
+        ('Skia — красивая 2D-графика (рисовать внутри `with canvas(fr) as c:`)',
+         ['canvas', 'flush', 'font', 'sk_color', 'sk_paint', 'sk_text', 'sk_text_width', 'sk_rrect', 'sk_rect', 'sk_circle',
+          'sk_line', 'sk_path', 'sk_image', 'sk_glow', 'lin_grad', 'rad_grad', 'sk_clip', 'sk_mask']),
+        ('Код с подсветкой', ['code_block']),
+        ('Постобработка кадра (после рисования)', ['bloom', 'vignette', 'film_grain', 'scanlines', 'motion_blur']),
+        ('3D-модели проекта (assets/models/, ракурсы считает «Подготовка»)', ['model']),
     ]
     out = []
     for title, names in groups:
@@ -95,6 +103,12 @@ def assets_list(studio, names=None):
             rows.append("- `image('%s')` — картинка %dx%d" % (n, m['w'], m['h']))
         elif k == 'audio':
             rows.append("- `a.clip('%s', t0, g)` — звук/музыка %.1f с (только в sound())" % (n, m['dur']))
+        elif k == 'model':
+            rows.append("- `place(fr, model('%s', t, spin=30), W / 2, H / 2)` — 3D-модель (.%s)"
+                        % (n[7:] if n.startswith('models/') else n, m.get('ext', '')))
+    md = os.path.join(studio.dir, 'cache', 'manim')
+    for nm in sorted(os.listdir(md)) if os.path.isdir(md) else []:
+        rows.append("- `video('cache/manim/%s', t, loop=False)` — график Manim (кадры с прозрачностью, через place)" % nm)
     return '\n'.join(rows) or '- (файлов пока нет — используйте только графику из кода)'
 
 
@@ -152,7 +166,8 @@ def brief(studio, goal='', dur=4.0, name='', assets=None, style='', example_sid=
 1. Первая строка — докстрока с кратким описанием сцены по-русски: `\"\"\"Что происходит в сцене.\"\"\"`
 2. Вторая строка — `from studio.kit import *` . Больше ничего импортировать нельзя, кроме `math`, `random`
    и модулей самого проекта из его папки `lib/` (`from lib.имя import *`), если они там есть
-   (уже доступны `np` = numpy, `cv2` = OpenCV, `math`). Запрещены файлы, сеть, `os`, `sys`, `subprocess`, `open`, `eval`, `exec`.
+   (уже доступны `np` = numpy, `cv2` = OpenCV, `math`, `skia`). Запрещены файлы, сеть, `os`, `sys`, `subprocess`, `open`, `eval`, `exec`.
+   Файлы проекта — только через функции kit (`image`, `video`, `model`, `font` …).
 3. Обязательно функция `def render(fr, t, dur):` — рисует ОДИН кадр:
    - `fr` — numpy-массив {fh}×{fw}×3 (высота×ширина), RGB, uint8. Рисовать прямо в него (изменять на месте), ничего не возвращать.
    - `t` — секунды от начала сцены (0 … dur), `dur` — длина сцены.
@@ -169,6 +184,10 @@ def brief(studio, goal='', dur=4.0, name='', assets=None, style='', example_sid=
    и готовые функции ниже. Тяжёлое (размытие больших картинок) — через параметры `image(..., blur=)`, они кэшируются.
 8. Кадр {fmt_name}: `W, H` = {fw}, {fh}. Используй W и H, а не числа, для позиций. {safe}
 9. Цвета — кортежи RGB `(r, g, b)` 0..255. Готовые: `CREAM, EMBER, RED, WHITE, BLACK`.
+   Красивые интерфейсы, карточки, графики, свечение — через Skia: `with canvas(fr) as c:` и функции `sk_*`
+   (сглаженные края, мягкие тени, градиенты); код на экране — `code_block(...)`; 3D-модели — `model(...)` + `place(...)`;
+   графики Manim — готовые кадры `video('cache/manim/ИмяСцены', t)` (их считает «Подготовка» из папки prerender/).
+   Тяжёлое (PyVista, Manim, большие размытия) в render() не делать.
 10. Появление/исчезновение делай плавным (`prog`, `oc`, `ioc`, параметры `fin`/`fout` у текстов).
 
 ## Шрифты
@@ -252,6 +271,9 @@ def static_check(code):
                     errors.append('Запрещённый импорт «%s» (строка %d)' % (m, node.lineno))
                 elif m not in ALLOWED_MODULES and root not in ALLOWED_MODULES and m != 'lib' and not m.startswith(ALLOWED_PREFIXES):
                     warnings.append('Необычный импорт «%s» (строка %d)' % (m, node.lineno))
+                elif root in HEAVY_MODULES:
+                    warnings.append('«%s» в сцене (строка %d): рендер 3D в каждом кадре — это секунды. Для моделей — '
+                                    'model(...) в kit, ракурсы посчитает «Подготовка».' % (m, node.lineno))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_CALLS:
             errors.append('Запрещённый вызов %s() (строка %d)' % (node.func.id, node.lineno))
         elif isinstance(node, ast.Attribute) and node.attr.startswith('__') and node.attr not in ('__doc__', '__name__'):

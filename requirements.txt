@@ -4,3 +4,11 @@ pillow
 scipy
 imageio-ffmpeg
 pillow-heif
+# --- красивая графика (VideoStudio 2.2). Если что-то не поставится, редактор всё равно работает:
+#     сцена, которой нужна библиотека, покажет заглушку «нет … — запусти установку».
+# Skia: на Mac с Intel колёс для Python 3.13+ нет — там нужен Python 3.12 (см. README).
+skia-python; sys_platform != "darwin" or platform_machine != "x86_64" or python_version < "3.13"
+pyvista
+trimesh
+pygments
+fonttools

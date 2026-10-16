@@ -96,6 +96,20 @@ place(fr, sprite('p_car_ok'), 960, 700, 2.0, op=prog(t, 0.5, 1.0))</pre>
 (<code>safe_area()</code> учитывает, включены ли полосы). Цвета — <code>(R, G, B)</code>.
 Можно пользоваться <code>np</code>, <code>cv2</code> и <code>math</code> напрямую.</p>
 
+<h3>Красивая графика: Skia, 3D, Manim, код (2.2)</h3>
+<pre>with canvas(fr) as c:                    # Skia: сглаживание, мягкие тени, градиенты
+    sk_rrect(c, 200, 200, 900, 400, 28, (24, 28, 38), shadow=(18, 40, 0.5))
+    sk_text(c, 'Заголовок', 260, 320, font('title', 72, 800), WHITE, glow=((120, 170, 255), 18))
+bloom(fr, 0.5); vignette(fr, 0.35)       # после блока — обычный numpy/cv2
+
+place(fr, model('Duck', t, spin=30), W / 2, H / 2)          # 3D из assets/models/
+place(fr, video('cache/manim/Chart', t, loop=False), W / 2, H / 2)   # график Manim
+code_block(fr, CODE, 200, 200, lang='python', reveal=prog(t, 0, 3) * 12, highlight=(4,))</pre>
+<p>Ещё: <code>sk_line</code>, <code>sk_path</code> (график, <code>k=</code> — прорисовка), <code>sk_image</code> (кадр в «окне»),
+<code>lin_grad</code>/<code>rad_grad</code>, <code>sk_clip</code>/<code>sk_mask</code> (маски), <code>film_grain</code>, <code>scanlines</code>, <code>motion_blur</code>.
+3D-ракурсы и Manim считает <b>«Подготовка»</b> (кнопка вверху) в папку <code>cache/</code> — кадр только читает готовое.
+Скрипты Manim и другие тяжёлые расчёты — в папке <code>prerender/</code> проекта. Подробно — в README.txt.</p>
+
 <h3>Звук — функция sound(a, dur)</h3>
 <table>
 <tr><td>a.braam(t, g)</td><td>тяжёлый трейлерный удар</td></tr>

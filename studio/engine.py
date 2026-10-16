@@ -35,6 +35,7 @@ HANG_SECONDS = 40         # столько может считаться оди�
 VIDEO_EXT = ('.mp4', '.mov', '.webm', '.mkv', '.m4v', '.avi')
 IMG_EXT = ('.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif')
 AUDIO_EXT = ('.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac')
+MODEL_EXT = ('.glb', '.gltf', '.obj', '.stl', '.ply')
 
 
 def safe_rel(name):
@@ -205,10 +206,14 @@ def _post(fr, t, lfi, hits, look):
         fr[kit.VY + kit.VH:] = 0
 
 
-def _error_frame(msg, W=1920, H=1080, title='ОШИБКА В СЦЕНЕ'):
+def _error_frame(msg, W=1920, H=1080, title='ОШИБКА В СЦЕНЕ', bg=(30, 12, 16), accent=(255, 130, 140)):
     fr = np.zeros((H, W, 3), np.uint8)
-    fr[:] = (30, 12, 16)
-    lines = [title] + msg.strip().splitlines()[-14:]
+    fr[:] = bg
+    import textwrap
+    body = []
+    for ln in msg.strip().splitlines():
+        body += textwrap.wrap(ln, 100, subsequent_indent='  ') or ['']
+    lines = [title] + body[-14:]
     from PIL import Image, ImageDraw, ImageFont
     im = Image.fromarray(fr)
     d = ImageDraw.Draw(im)
@@ -217,8 +222,12 @@ def _error_frame(msg, W=1920, H=1080, title='ОШИБКА В СЦЕНЕ'):
         f1 = kit._font('oswald', 600, 64)
         f2 = kit._font('oswald', 300, 30)
     except Exception:
-        f1 = f2 = ImageFont.load_default()
-    d.text((80, 80), lines[0], font=f1, fill=(255, 130, 140))
+        try:                        # в проекте нет Oswald — встроенный JetBrains Mono (есть кириллица)
+            jb = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts', 'JetBrainsMono.ttf')
+            f1, f2 = ImageFont.truetype(jb, 56), ImageFont.truetype(jb, 26)
+        except Exception:
+            f1 = f2 = ImageFont.load_default()
+    d.text((80, 80), lines[0], font=f1, fill=accent)
     y = 190
     for ln in lines[1:]:
         d.text((80, y), ln[:110], font=f2, fill=(240, 222, 226))
@@ -256,16 +265,45 @@ def render_one(task):
         layers.draw(fr, t, dur, lays, 'bottom')
         hits = []
         if task.get('code', '').strip():
+            kit._gfx._reset()
             mod = load_module(task['path'], task['code'])
             _call_render(mod, fr, t, dur)
+            kit._gfx._reset()               # холсты Skia без `with` — дописать в кадр
             hits = getattr(mod, 'HITS', []) or []
         layers.draw(fr, t, dur, lays, 'top')
         fx.apply_all(fr, t, dur, task.get('fx'), task.get('lfi', 0))
         _post(fr, t, task['lfi'], hits, task['look'])
-    except Exception:
-        err = _clean_tb(task['path'])
-        fr = _error_frame(err, kit.W, kit.H)
+    except Exception as e:
+        miss = _missing_lib(e)
+        if miss:
+            err = miss
+            fr = _error_frame(miss, kit.W, kit.H, title='НЕ ХВАТАЕТ БИБЛИОТЕКИ', bg=(22, 26, 36), accent=(150, 190, 255))
+        else:
+            err = _clean_tb(task['path'])
+            fr = _error_frame(err, kit.W, kit.H)
+    finally:
+        try:
+            kit._gfx._reset()
+        except Exception:
+            pass
     return fr, sorted(kit.USED), dict(kit.NEW_DEFAULTS), err, sorted(kit.ASSETS_USED)
+
+
+OPTIONAL_LIBS = {'skia': 'skia-python', 'pyvista': 'pyvista', 'vtk': 'pyvista', 'trimesh': 'trimesh',
+                 'pygments': 'pygments', 'fontTools': 'fonttools', 'manim': 'manim', 'manimpango': 'manim'}
+
+
+def _missing_lib(e):
+    """Сцене нужна необязательная библиотека, которой нет: понятная подсказка вместо трассировки."""
+    from . import gfx
+    if isinstance(e, gfx.Missing):
+        return str(e)
+    if isinstance(e, ImportError):
+        root = (getattr(e, 'name', None) or '').split('.')[0]
+        if root in OPTIONAL_LIBS:
+            return ('Нет %s — запусти установку: закрой редактор и запусти start_… снова '
+                    '(или: pip install -r requirements.txt)' % OPTIONAL_LIBS[root])
+    return None
 
 
 def _clean_tb(path):
@@ -1761,6 +1799,8 @@ class Studio:
                     elif ext in AUDIO_EXT:
                         it.update(kind='audio', dur=_audio_dur(self.ffmpeg, path),
                                   ref='assets/' + (rel_dir + '/' if rel_dir else '') + f)
+                    elif ext in MODEL_EXT:
+                        it.update(kind='model', ext=ext[1:])
                     else:
                         continue
                     out.append(it)
@@ -1791,6 +1831,85 @@ class Studio:
         else:
             return None
         return p if os.path.isfile(p) and p.lower().endswith(AUDIO_EXT) else None
+
+    # ------------------------------------------------------------------ «Подготовка» (studio/prerender.py)
+    def prerender_needed(self):
+        """Есть ли что считать: сцены просили ракурсы 3D, скрипты prerender/ изменились, или в сценах есть model()."""
+        from . import prerender
+        try:
+            if prerender.status(self.dir)['todo']:
+                return True
+        except Exception:
+            return False
+        with self.lock:
+            return any('model(' in c for c in self.codes.values())
+
+    def prerender_status(self):
+        from . import prerender
+        try:
+            info = prerender.status(self.dir)
+        except Exception as e:
+            info = dict(scripts=[], models=[], todo=0, libs={}, error=str(e))
+        st = getattr(self, 'prerender_state', None) or dict(state='idle', log=[])
+        return dict(info, state=st.get('state'), log=st.get('log', [])[-300:], result=st.get('result'),
+                    started=st.get('started'))
+
+    def prerender(self, force=False):
+        """Запустить «Подготовку» в фоне (отдельный процесс: PyVista и Manim не попадают в процессы рендера)."""
+        st = getattr(self, 'prerender_state', None)
+        if st and st.get('state') == 'running':
+            return False
+        threading.Thread(target=self._prerender_run, args=(force,), daemon=True).start()
+        return True
+
+    def cancel_prerender(self):
+        st = getattr(self, 'prerender_state', None)
+        if st and st.get('proc') is not None:
+            try:
+                st['proc'].kill()
+            except Exception:
+                pass
+
+    def _prerender_run(self, force=False, export_st=None):
+        st = dict(state='running', log=[], started=time.time(), proc=None, result=None)
+        self.prerender_state = st
+        cmd = [sys.executable, '-m', 'studio.prerender', self.dir] + (['--force'] if force else [])
+        env = dict(os.environ, PYTHONIOENCODING='utf-8')
+        env['PYTHONPATH'] = self.pkg_parent + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
+        try:
+            p = subprocess.Popen(cmd, cwd=self.pkg_parent, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 text=True, encoding='utf-8', errors='replace', bufsize=1)
+            st['proc'] = p
+            for ln in p.stdout:
+                ln = ln.rstrip()
+                if ln.startswith('@@RESULT '):
+                    try:
+                        st['result'] = json.loads(ln[9:])
+                    except ValueError:
+                        pass
+                    continue
+                if not ln or 'bad X server' in ln or 'vtkXOpenGLRenderWindow' in ln or 'Fontconfig warning' in ln:
+                    continue
+                st['log'].append(ln[-400:])
+                del st['log'][:-1000]
+                if export_st is not None:
+                    export_st['msg'] = 'Подготовка: ' + ln.strip()[:80]
+                    if export_st.get('cancel'):
+                        p.kill()
+            p.wait()
+            if st['result'] is None:
+                st['result'] = dict(ok=False, errors=['«Подготовка» остановлена (код %s)' % p.returncode])
+            st['state'] = 'done' if st['result'].get('ok') else 'error'
+        except Exception as e:
+            st['log'].append('Ошибка: %s' % e)
+            st['result'] = dict(ok=False, errors=[str(e)])
+            st['state'] = 'error'
+        finally:
+            st['proc'] = None
+            with self.lock:
+                self._virtual.clear()
+            self.invalidate()                 # готовые ракурсы и кадры Manim — пересчитать превью
+        return st['result']
 
     # ------------------------------------------------------------------ export
     def export(self, crf=18):
@@ -1825,6 +1944,14 @@ class Studio:
                 versions.create(self, 'Перед экспортом', auto=True)
             except Exception:
                 traceback.print_exc()
+            # «Подготовка»: 3D-модели и prerender/*.py — только то, что ещё не посчитано
+            if self.prerender_needed():
+                st['msg'] = 'Подготовка (3D, Manim)…'
+                res = self._prerender_run(False, st)
+                if st.get('cancel'):
+                    raise RuntimeError('Экспорт отменён')
+                if res and res.get('errors'):
+                    st['warn'] = 'Подготовка: ' + '; '.join(res['errors'])[:400]
             # подождать, пока закончатся текущие кадры превью
             t0 = time.time()
             while self.inflight and time.time() - t0 < 20:
@@ -1897,7 +2024,7 @@ class Studio:
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0:
                 raise RuntimeError('ffmpeg: ' + r.stderr[-800:])
-            self.export_state = dict(state='done', progress=1.0, file=name, path=out,
+            self.export_state = dict(state='done', progress=1.0, file=name, path=out, warn=st.get('warn'),
                                      seconds=round(time.time() - st['started'], 1))
         except Exception as e:
             self.export_state = dict(state='error', msg=str(e), progress=st.get('progress', 0))

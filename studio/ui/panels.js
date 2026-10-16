@@ -31,8 +31,8 @@ function fmtVal(el) {
 
 // ================================================================== медиа (список файлов)
 let ASSETS = [];
-const KIND_LABEL = { video: 'видео', image: 'картинка', sprite: 'вырезанный', audio: 'музыка / звук' };
-const KIND_TABS = [['all', 'Все'], ['video', 'Видео'], ['image', 'Картинки'], ['sprite', 'Вырезанные'], ['audio', 'Музыка']];
+const KIND_LABEL = { video: 'видео', image: 'картинка', sprite: 'вырезанный', audio: 'музыка / звук', model: '3D-модель' };
+const KIND_TABS = [['all', 'Все'], ['video', 'Видео'], ['image', 'Картинки'], ['sprite', 'Вырезанные'], ['audio', 'Музыка'], ['model', '3D']];
 const fmtDur = d => d >= 60 ? `${Math.floor(d / 60)}:${String(Math.round(d % 60)).padStart(2, '0')}` : `${(+d).toFixed(1)} с`;
 const baseName = n => n.split('/').pop();
 async function loadAssets() {
@@ -60,7 +60,7 @@ X.stopAudioPreview = () => { pv.pause(); pvRef = null; };
    opts: kinds — какие типы показывать; mode: 'multi' | 'single' | 'action';
          selected — Set имён; filter(item) — доп. отбор; onChange(set); onAction(item, event) */
 function mediaPicker(host, opts = {}) {
-  const kinds = opts.kinds || ['video', 'image', 'sprite', 'audio'];
+  const kinds = opts.kinds || ['video', 'image', 'sprite', 'audio', 'model'];
   const mode = opts.mode || 'multi';
   const sel = opts.selected || new Set();
   let folder = '*', kind = opts.kind || 'all', q = '';
@@ -89,7 +89,7 @@ function mediaPicker(host, opts = {}) {
   }
   function tile(a) {
     const on = mode !== 'action' && sel.has(a.name);
-    const meta = a.kind === 'audio' ? fmtDur(a.dur || 0) : (a.w ? `${a.w}×${a.h}` : '');
+    const meta = a.kind === 'audio' ? fmtDur(a.dur || 0) : a.kind === 'model' ? '.' + (a.ext || '') : (a.w ? `${a.w}×${a.h}` : '');
     const th = a.kind === 'audio'
       ? `<div class="th audio">${icon('volume')}<button class="playbtn" data-play="${esc(a.ref)}" title="Послушать">${icon('play')}</button></div>`
       : `<div class="th"><img loading="lazy" src="/api/thumb?name=${encodeURIComponent(a.name)}&v=${a.mtime}" alt=""></div>`;
@@ -131,6 +131,13 @@ function initMediaTab() {
         toast(r.error ? 'Ошибка: ' + esc(r.error) : 'Музыка ролика заменена. Звук пересводится…');
         X.refresh(); loadAssets(); return;
       }
+      if (a.kind === 'model') {
+        // 3D — только из кода: model() отдаёт готовый ракурс из «Подготовки»
+        const snip = `place(fr, model('${a.name.replace(/^models\//, '')}', t, spin=30), W / 2, H / 2)`;
+        X.switchTab('code'); X.ed.insert(snip);
+        toast(`Вставлено в код: <code>${esc(snip)}</code><br>Ракурсы посчитает «Подготовка» (кнопка вверху) — до этого в кадре заглушка.`, 5000);
+        return;
+      }
       if (e.altKey) {
         const snip = a.kind === 'video' ? `video('${a.name}', t)` : a.kind === 'sprite' ? `sprite('${a.name}')` : `image('${a.name}')`;
         X.switchTab('code'); X.ed.insert(snip);
@@ -142,7 +149,7 @@ function initMediaTab() {
     },
   });
 }
-const MEDIA_RE = /\.(mp4|mov|webm|mkv|m4v|avi|png|jpe?g|webp|mp3|wav|ogg|m4a|aac|flac)$/i;
+const MEDIA_RE = /\.(mp4|mov|webm|mkv|m4v|avi|png|jpe?g|webp|heic|heif|mp3|wav|ogg|m4a|aac|flac|glb|gltf|obj|stl|ply)$/i;
 async function uploadFiles(list) {
   // list: [{file, folder}]
   const cut = $('cutout').checked ? 1 : 0;

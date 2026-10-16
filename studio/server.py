@@ -310,6 +310,8 @@ class H(BaseHTTPRequestHandler):
                 return self.js(dict(ver=S.audio_ver, peaks=S.audio_peaks, rate=S.audio_peaks_rate))
             if p == '/api/assets':
                 return self.js(self.list_assets())
+            if p == '/api/prerender':
+                return self.js(S.prerender_status())
             if p == '/api/thumb':
                 return self.thumb(q.get('name', ''))
             if p == '/api/media':
@@ -435,6 +437,11 @@ class H(BaseHTTPRequestHandler):
             if p == '/api/export':
                 ok = S.export(self.jbody().get('crf', 18))
                 return self.js(dict(ok=ok, error=None if ok else 'Экспорт уже идёт'))
+            if p == '/api/prerender':
+                return self.js(dict(ok=S.prerender(bool(self.jbody().get('force')))))
+            if p == '/api/prerender/cancel':
+                S.cancel_prerender()
+                return self.js(dict(ok=True))
             if p == '/api/export/cancel':
                 S.cancel_export()
                 return self.js(dict(ok=True))
@@ -572,6 +579,15 @@ class H(BaseHTTPRequestHandler):
             os.makedirs(d, exist_ok=True)
             self.save_upload(os.path.join(d, name), 1 << 30)
             return self.js(dict(ok=True, name=((folder + '/') if folder else '') + os.path.splitext(name)[0], kind='audio'))
+        if ext in engine.MODEL_EXT:
+            # 3D-модель: в assets/models/ (или в выбранную папку внутри неё)
+            name = safe_name(raw_name, engine.MODEL_EXT)
+            d = d if folder else os.path.join(S.dir, 'assets', 'models')
+            os.makedirs(d, exist_ok=True)
+            self.save_upload(os.path.join(d, name), 1 << 30)
+            rel = os.path.relpath(os.path.join(d, os.path.splitext(name)[0]), os.path.join(S.dir, 'assets'))
+            S.invalidate()
+            return self.js(dict(ok=True, name=rel.replace(os.sep, '/'), kind='model'))
         os.makedirs(d, exist_ok=True)
         if ext in VID_EXT:
             name = safe_name(raw_name, VID_EXT)
@@ -672,10 +688,34 @@ class H(BaseHTTPRequestHandler):
     def list_assets(self):
         return S.list_media()
 
+    def model_thumb(self, name, path):
+        """Превью 3D-модели: готовый ракурс из «Подготовки» или заглушка."""
+        from . import kit
+        stem = re.sub(r'\W+', '_', os.path.splitext(os.path.basename(path))[0])[:32]
+        d = os.path.join(S.dir, 'cache', 'models')
+        best = None
+        for sub in os.listdir(d) if os.path.isdir(d) else []:
+            if sub.startswith(stem + '-'):
+                f = os.path.join(d, sub, 'a000.png')
+                if not os.path.isfile(f):
+                    pngs = sorted(x for x in os.listdir(os.path.join(d, sub)) if x.startswith('a') and x.endswith('.png'))
+                    f = os.path.join(d, sub, pngs[0]) if pngs else None
+                if f and (best is None or os.path.getmtime(f) > os.path.getmtime(best)):
+                    best = f
+        if best:
+            im = cv2.imdecode(np.fromfile(best, np.uint8), cv2.IMREAD_UNCHANGED)
+        else:
+            im = cv2.cvtColor(kit._model_stub(320, os.path.basename(path), 'нажмите «Подготовка»'), cv2.COLOR_RGBA2BGRA)
+        h, w = im.shape[:2]
+        s = 320 / max(w, h)
+        im = cv2.resize(im, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA)
+        return self.send(200, cv2.imencode('.png', im)[1].tobytes(), 'image/png')
+
     def thumb(self, name):
         path = S.asset_path(name)
         if not path:
-            return self.send(404)
+            mp_ = S.asset_path(name, engine.MODEL_EXT)
+            return self.model_thumb(name, mp_) if mp_ else self.send(404)
         key = (path, os.path.getmtime(path))
         if _THUMBS.get(name, (None,))[0] != key:
             if path.lower().endswith(VID_EXT):

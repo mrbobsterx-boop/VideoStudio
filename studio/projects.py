@@ -236,7 +236,8 @@ def inspect(d):
     scenes = p.get('scenes', [])
     py = 0
     lib = []
-    for sub in ('scenes', 'lib'):
+    pre = []
+    for sub in ('scenes', 'lib', 'prerender'):
         base = os.path.join(d, sub)
         for root, dirs, files in os.walk(base):
             dirs[:] = [x for x in dirs if x not in ('__pycache__', '_history', '_trash')]
@@ -245,10 +246,12 @@ def inspect(d):
                     py += 1
                     if sub == 'lib':
                         lib.append(os.path.relpath(os.path.join(root, fn), base).replace(os.sep, '/'))
+                    elif sub == 'prerender':
+                        pre.append(os.path.relpath(os.path.join(root, fn), base).replace(os.sep, '/'))
     need = p.get('editor_min')
     too_old = bool(need) and _ver(need) > _ver(VERSION)
     return dict(id=_pid(d), path=d, title=p.get('title') or os.path.basename(d), scenes=len(scenes),
-                duration=round(sum(float(s.get('dur', 0)) for s in scenes), 1), py=py, lib=sorted(lib),
+                duration=round(sum(float(s.get('dur', 0)) for s in scenes), 1), py=py, lib=sorted(lib), prerender=sorted(pre),
                 editor_min=need, editor=VERSION, too_old=too_old, known=is_known(d))
 
 

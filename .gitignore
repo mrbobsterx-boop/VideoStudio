@@ -15,3 +15,5 @@ projects/*/_versions/
 projects/*/scenes/_history/
 projects/*/scenes/_trash/
 .recent_projects
+project/cache/
+projects/*/cache/

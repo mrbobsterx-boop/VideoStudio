@@ -359,7 +359,8 @@ async function confirmAndOpen(info, body) {
   if (info.too_old) return toast(`Проекту нужна версия VideoStudio ${esc(info.editor_min)}, у вас ${esc(info.editor)}. Обновите программу и откройте снова.`, 9000);
   if (!info.known) {
     const lib = info.lib && info.lib.length ? `\nМодули стиля (папка lib): ${info.lib.join(', ')}` : '';
-    const where = info.imported ? `\nРаспакован в: ${info.path}` : `\nПапка: ${info.path}`;
+    const pre = info.prerender && info.prerender.length ? `\nСкрипты «Подготовки» (prerender/ — обычный Python, запускаются кнопкой «Подготовка» и перед экспортом): ${info.prerender.join(', ')}` : '';
+    const where = (info.imported ? `\nРаспакован в: ${info.path}` : `\nПапка: ${info.path}`) + pre;
     const skipped = info.skipped ? `\nФайлов вне папки проекта пропущено: ${info.skipped}` : '';
     const ok = confirm(`Открыть проект «${info.title}»?\n\nСцен: ${info.scenes}, длина ${Math.floor(info.duration / 60)}:${String(Math.round(info.duration % 60)).padStart(2, '0')}` +
       `\nФайлов с кодом Python: ${info.py}${lib}${where}${skipped}` +
@@ -604,3 +605,57 @@ async function soundAI(body) {
   };
 }
 })();
+
+// ================================================================== «Подготовка» (3D, Manim, тяжёлые эффекты → cache/)
+let prepTimer = null;
+async function openPrerender() {
+  const body = X.openModal('Подготовка', '', { narrow: true, onClose: () => { clearInterval(prepTimer); prepTimer = null; } });
+  let lastLen = -1;
+  const render = async () => {
+    const r = await api.get('/api/prerender');
+    if (!r || r.error && !r.scripts) { body.innerHTML = `<p class="mnote bad">${esc((r && r.error) || 'Нет ответа')}</p>`; return; }
+    const running = r.state === 'running';
+    const libs = r.libs || {};
+    const miss = Object.keys(libs).filter(k => !libs[k]);
+    const models = (r.models || []).map(m => `<div class="prep-row">${icon('cube')}<b>${esc(m.file)}</b><span>${m.views} ракурс(ов) ещё не посчитано</span></div>`).join('');
+    const scripts = (r.scripts || []).map(s => `<div class="prep-row">${icon(s.manim ? 'spark' : 'code')}<b>prerender/${esc(s.file)}</b>
+        <span>${s.manim ? 'Manim: ' + esc(s.scenes.join(', ') || '—') + ' · ' : ''}${s.error ? '<em class="bad">ошибка</em>' : s.stale ? 'нужно посчитать' : 'готово ✓'}</span></div>`).join('');
+    const head = `<div class="mcol">
+      <p class="mnote" style="margin:0">Тяжёлое считается <b>один раз</b> и кладётся в папку <code>cache/</code> проекта, а кадр сцены только читает готовое:
+        ракурсы 3D-моделей (<code>model(...)</code>), графики и схемы Manim и другие скрипты из папки <code>prerender/</code>.
+        Перед экспортом «Подготовка» запускается сама — только для того, что изменилось.</p>
+      <p class="mnote warn" style="margin:0">Скрипты <code>prerender/*.py</code> — обычный Python с полным доступом к компьютеру (это не сцены).
+        Запускайте только свои проекты или те, которым доверяете.</p>
+      ${miss.length ? `<p class="mnote warn" style="margin:0">Не установлено: ${miss.map(esc).join(', ')}. ${miss.includes('manim') ? 'Manim нужен только для графиков: <code>pip install -r requirements-manim.txt</code> (см. README). ' : ''}${miss.includes('pyvista') ? '3D: перезапустите start_… — библиотеки доустановятся.' : ''}</p>` : ''}
+      <h4>Что нужно посчитать</h4>
+      <div class="prep-list">${models + scripts || '<div class="empty"><b>Всё готово</b>Сцены с model(...) и папка prerender/ — посчитаны</div>'}</div>
+      <div class="mrow">
+        <button class="solid-accent" id="prepRun" style="padding:9px 16px;border-radius:8px" ${running ? 'disabled' : ''}>${icon('cube')}${running ? 'Считается…' : 'Запустить'}</button>
+        <button class="ghost small" id="prepForce" ${running ? 'disabled' : ''} title="Пересчитать все скрипты prerender/ заново">Всё заново</button>
+        ${running ? '<button class="ghost small" id="prepStop">Остановить</button>' : ''}
+        <span class="mnote">${r.result ? (r.result.ok ? `Готово за ${r.result.seconds} с` : 'Были ошибки — см. журнал') : ''}</span>
+      </div>
+      <h4>Журнал</h4><pre class="prep-log" id="prepLog"></pre></div>`;
+    const keepScroll = $('prepLog') && ($('prepLog').scrollTop + $('prepLog').clientHeight >= $('prepLog').scrollHeight - 8);
+    body.innerHTML = head;
+    const lg = $('prepLog');
+    lg.textContent = (r.log || []).join('\n') || '—';
+    if (keepScroll || lastLen !== (r.log || []).length) lg.scrollTop = lg.scrollHeight;
+    lastLen = (r.log || []).length;
+    $('prepRun').onclick = () => api.post('/api/prerender', {}).then(render);
+    $('prepForce').onclick = () => api.post('/api/prerender', { force: true }).then(render);
+    if ($('prepStop')) $('prepStop').onclick = () => api.post('/api/prerender/cancel').then(render);
+    $('prepDot').hidden = !(r.todo > 0);
+    if (!running && r.state === 'done' && !render.reloaded) { render.reloaded = true; X.dropFrames && X.dropFrames(); X.loadAssets && X.loadAssets(); }
+    if (running) render.reloaded = false;
+  };
+  clearInterval(prepTimer);
+  prepTimer = setInterval(render, 1200);
+  render();
+}
+$('prepBtn').onclick = openPrerender;
+async function checkPrerender() {
+  try { const r = await api.get('/api/prerender'); $('prepDot').hidden = !(r && r.todo > 0); } catch (e) { /* сервер занят */ }
+}
+setInterval(checkPrerender, 15000);
+setTimeout(checkPrerender, 3000);

@@ -17,8 +17,12 @@ SHELTER STUDIO — редактор роликов на Python
             (если macOS не даёт открыть: правый щелчок → «Открыть» → «Открыть»)
   Linux:    bash start_linux.sh
 
-Первый запуск 1–3 минуты: программа сама ставит нужные библиотеки
+Первый запуск 2–5 минут: программа сама ставит нужные библиотеки
 (нужен интернет). Потом открывается браузер с редактором.
+После обновления (git pull) скрипт запуска сам доставит новые библиотеки:
+он сравнивает requirements.txt с тем, что уже установлено. Если какая-то
+библиотека не поставилась, редактор всё равно откроется, а сцена, которой
+она нужна, покажет заглушку «нет … — запусти установку».
 Окно с чёрной консолью не закрывайте — это и есть программа.
 Закрыли консоль — редактор остановился (последние правки сохраняются).
 
@@ -52,6 +56,11 @@ SHELTER STUDIO — редактор роликов на Python
                    задание для ИИ (ChatGPT, Claude…): правила, справочник всех
                    команд, список ваших картинок и шрифтов. Вставьте ответ ИИ —
                    программа проверит код, покажет кадры и добавит сцену.
+  Подготовка     — заранее посчитать тяжёлое: ракурсы 3D-моделей, графики
+                   Manim и скрипты из папки prerender/ проекта. Результат —
+                   в папке cache/ проекта, сцены только читают готовое.
+                   Перед экспортом запускается сама (только то, что изменилось).
+                   Точка на кнопке — есть что посчитать. См. «КРАСИВАЯ ГРАФИКА».
   Версии         — снимки всего ролика. Сохраняются сами перед экспортом,
                    автомонтажом и восстановлением; свою можно сохранить в любой
                    момент и вернуть одной кнопкой.
@@ -103,6 +112,10 @@ SHELTER STUDIO — редактор роликов на Python
   project/scenes/_history/ прошлые версии кода сцен
   project/_versions/      сохранённые версии всего ролика
   project/assets/         картинки, видео и звуки (можно по папкам)
+  project/assets/models/  3D-модели (.glb .gltf .obj .stl .ply)
+  project/assets/desk/    записи экрана (например, из «Видео Десктоп»)
+  project/prerender/      скрипты «Подготовки» (Manim, облёты, тяжёлые эффекты)
+  project/cache/          результаты «Подготовки» (можно удалить — пересчитается)
   project/fonts/          шрифты (Oswald, Cormorant — свободная лицензия OFL)
   project/audio/          загруженная музыка
   project/exports/        готовые видео
@@ -143,6 +156,157 @@ fonts/ ещё и в этой папке (путь относительно пр�
 если их не включили в «Настройках» (у трейлера SHELTER всё как раньше).
 
 
+КРАСИВАЯ ГРАФИКА: SKIA, 3D-МОДЕЛИ, MANIM, КОД   (VideoStudio 2.2 и новее)
+----------------------------------------------
+Всё доступно в сцене через  from studio.kit import *  — ничего импортировать
+не нужно. Полный список с подсказками — в «Сцена от ИИ» (справочник команд).
+
+Установка
+  requirements.txt уже содержит skia-python, pyvista, trimesh, pygments,
+  fonttools — их ставит скрипт запуска. Manim — отдельно и только если нужны
+  графики Manim (он работает лишь в «Подготовке», не в кадре):
+    Windows:  .venv\Scripts\python.exe -m pip install -r requirements-manim.txt
+    macOS:    brew install cairo pango pkg-config
+              .venv/bin/python -m pip install -r requirements-manim.txt
+    Linux:    sudo apt install libcairo2-dev libpango1.0-dev pkg-config
+              .venv/bin/python -m pip install -r requirements-manim.txt
+  LaTeX не нужен: в Manim пишите Text(...), а не MathTex/Tex.
+  Честно о платформах:
+  • Mac с Intel + Python 3.13 или новее: для skia-python готовой сборки нет.
+    Поставьте Python 3.12 с python.org, удалите папку .venv и запустите снова.
+    Без этого Skia-сцены покажут заглушку, остальное работает.
+  • Linux: Skia и PyVista нужна системная libEGL (на обычном рабочем столе
+    и Steam Deck она есть). Если нет: sudo apt install libegl1 libgl1.
+  • Windows, Mac M1–M4, Linux x86/ARM: всё ставится готовыми сборками.
+
+Skia — 2D как в браузере: сглаженные края, мягкие тени, градиенты, свечение
+  with canvas(fr) as c:       — холст поверх кадра; после блока кадр обновлён,
+                                дальше можно снова numpy/cv2/kit
+  font(name, size, weight)    — шрифт из fonts/ проекта или роль 'title'/'text'/
+                                'serif'/'code' (JetBrains Mono встроен); толщина
+                                вариативных шрифтов применяется (кэшируется)
+  sk_text(c, s, x, y, f, color, op, align, track, shadow, glow, shader)
+  sk_rrect(c, x, y, w, h, r, color, op, shadow=(dy, blur, a), stroke=(цвет, w))
+  sk_rect, sk_circle, sk_glow, sk_line(…, dash, glow, k), sk_path(pts, …, k, area)
+  sk_image(c, img, x, y, w, h, r, shadow) — фото/кадр видео в «окне» со скруглением
+  lin_grad(x0, y0, x1, y1, цвета), rad_grad(cx, cy, r, цвета) — для shader=/fill=
+  with sk_clip(c, x, y, w, h, r):  — маска-окно
+  with sk_mask(c, lin_grad(...)):  — мягкая маска по прозрачности градиента
+  Цвета — (r, g, b), (r, g, b, a) или '#rrggbb'. y у текста — базовая линия.
+
+Постобработка кадра (numpy/cv2, быстро): bloom(fr, 0.6), vignette(fr, 0.4),
+  film_grain(fr, t, 0.05), scanlines(fr, 0.15), motion_blur(fr, dx, dy)
+
+Код с подсветкой: code_block(fr, текст, x, y, lang='python', size=28,
+  theme='one-dark', reveal=строк, highlight=(номера строк), title='file.gd',
+  cursor=True, t=t)  — Pygments + Skia, построчное появление (reveal дробный —
+  последняя строка печатается по буквам), остальные строки приглушаются.
+
+3D-модели: файлы в assets/models/.  model('Duck', t, azimuth=0, spin=30,
+  elevation=15, zoom=1, light='studio'|'soft'|'warm'|'cool'|'dramatic',
+  shadow=True, up=None)  — картинка RGBA для place(fr, …).
+  Свет «ключ / заполнение / контур», мягкая тень на прозрачном полу.
+  Кадр сцены модель НЕ считает: ракурсы рендерит «Подготовка» (PyVista) в
+  cache/models/ — шагом 2°, при spin — полный облёт. Пока ракурса нет, в кадре
+  заглушка «нажмите «Подготовка»». Лежит на боку — допишите up='z'.
+  Лучше .glb (один файл с текстурами).
+
+Записи экрана: кладите в assets/desk/ — в коде video('desk/имя', t).
+  Красиво в «окне»: with canvas(fr) as c: sk_image(c, video('desk/rec', t),
+  200, 120, 1520, 855, r=18, shadow=(20, 50, 0.5))
+
+«Подготовка» — кнопка вверху или  python -m studio.prerender папка_проекта
+  1) находит в сценах model(...) и рендерит нужные ракурсы;
+  2) запускает prerender/*.py: файл с «from manim import» — каждая сцена Manim
+     рендерится кадрами PNG с прозрачностью в cache/manim/<ИмяСцены>/
+     (размер кадра проекта; свой — RESOLUTION = (1400, 800), FPS = 30 в файле);
+     шрифты из fonts/ проекта Manim видит по имени: Text('…', font='Manrope');
+     другие .py — обычные скрипты (тяжёлые размытия, облёты), помощники:
+       from studio import prerender as P
+       P.cache('blur/bg.png') — путь в cache/,  P.asset('photo.jpg'),
+       P.save_frames('fx/smoke', кадры, fps=30),  P.orbit('Duck', step=2)
+  3) скрипт пересчитывается, только если он или шрифты изменились
+     («Всё заново» — пересчитать всё).
+  В сцене готовое — как медиа: video('cache/manim/Chart', t, loop=False),
+  image('cache/blur/bg').
+  ВНИМАНИЕ: prerender/*.py — обычный Python с полным доступом к компьютеру
+  (в отличие от сцен). Запускайте «Подготовку» только в своих проектах.
+
+Скорость: кадр сцены должен считаться за 0.3 с или быстрее. Skia-холст
+  1920×1080 — около 2 мс на вход/выход, шрифты и разметка кода кэшируются,
+  3D и Manim в кадре только читаются с диска. Кэши ограничены по памяти.
+
+Пример 1 — интерфейс на Skia
+  from studio.kit import *
+
+  def render(fr, t, dur):
+      k = oc(prog(t, 0.2, 1.2))
+      with canvas(fr) as c:
+          sk_rect(c, 0, 0, W, H, shader=lin_grad(0, 0, W, H, [(14, 18, 28), (6, 8, 14)]))
+          sk_glow(c, W * 0.75, H * 0.3, 420, (60, 110, 220), 0.35)
+          x, y, w, h = 300, 220 + (1 - k) * 60, 1320, 640
+          sk_rrect(c, x, y, w, h, 32, (22, 27, 40), k, shadow=(24, 60, 0.55))
+          sk_text(c, tx('ui_title', 'Неделя 3: игроки'), x + 70, y + 120,
+                  font('title', 64, 800), WHITE, k, glow=((120, 170, 255), 22, 0.5 * k))
+          pts = [(x + 80 + i * 145, y + 520 - v * 2.6)
+                 for i, v in enumerate([20, 45, 38, 70, 64, 95, 120, 110, 140])]
+          sk_path(c, pts, w=0, area=y + 580, op=oc(prog(t, 1.2, 2.6)),
+                  fill=lin_grad(0, y + 200, 0, y + 580, [(90, 150, 255, 150), (90, 150, 255, 0)]))
+          sk_path(c, pts, (120, 175, 255), 6, glow=((80, 140, 255), 14), k=oc(prog(t, 0.8, 2.6)))
+      bloom(fr, 0.5)
+      vignette(fr, 0.35)
+
+Пример 2 — 3D-модель (файл assets/models/Duck.glb)
+  from studio.kit import *
+
+  def render(fr, t, dur):
+      fill(fr, (16, 19, 28))
+      glow_ellipse(fr, W / 2, H * 0.62, 620, 260, (40, 60, 110), sigma=160, amount=0.9)
+      duck = model('Duck', t, azimuth=-60, spin=40, elevation=18, light='studio')
+      place(fr, duck, W / 2, H / 2 + 20, sc=oback(prog(t, 0, 0.8)) * 0.95)
+
+Пример 3 — график Manim (файл prerender/chart.py, затем «Подготовка»)
+  # prerender/chart.py
+  from manim import *
+  RESOLUTION = (1400, 800)
+
+  class Chart(Scene):
+      def construct(self):
+          ax = Axes(x_range=[0, 6, 1], y_range=[0, 110, 20], x_length=10, y_length=5.2,
+                    axis_config={"color": "#9aa4b2", "include_tip": False})
+          title = Text("Часов на сцену", font="Manrope", font_size=40).to_edge(UP)
+          line = ax.plot_line_graph([0, 1, 2, 3, 4, 5], [100, 48, 26, 15, 9, 5], line_color="#6fa0ff")
+          self.play(Create(ax), Write(title), run_time=1.2)
+          self.play(Create(line), run_time=2.2)
+          self.wait(1.6)
+
+  # сцена ролика
+  from studio.kit import *
+
+  def render(fr, t, dur):
+      fill(fr, (11, 15, 20))
+      place(fr, video('cache/manim/Chart', t, loop=False), W / 2, H / 2)
+      bloom(fr, 0.35)
+
+Пример 4 — код с подсветкой
+  from studio.kit import *
+
+  CODE = """extends CharacterBody2D
+
+  @export var speed := 220.0
+
+  func _physics_process(delta):
+      velocity = Input.get_vector("left", "right", "up", "down") * speed
+      move_and_slide()
+  """
+
+  def render(fr, t, dur):
+      fill(fr, (12, 14, 20))
+      code_block(fr, CODE, 160, 200, lang='gdscript', size=32, title='player.gd',
+                 reveal=prog(t, 0.3, 3.5) * 7, highlight=(6,) if t > 4 else (),
+                 cursor=True, t=t)
+
+
 БЕЗОПАСНОСТЬ
 ------------
 Редактор работает только на вашем компьютере (адрес 127.0.0.1) — из сети
@@ -151,6 +315,8 @@ fonts/ ещё и в этой папке (путь относительно пр�
 ничего не могут в нём сделать. Код сцены выполняется в отдельных процессах:
 зависшая сцена останавливается сама через 40 секунд, редактор продолжает работать.
 Код от ИИ перед добавлением проверяется (запрещены файлы, сеть, системные вызовы).
+Скрипты prerender/*.py этим правилам не подчиняются — это обычный Python
+(для Manim и других тяжёлых расчётов). Окно «Подготовка» напоминает об этом.
 
 Сцены проекта — это код на Python, он выполняется на вашем компьютере. Поэтому
 перед ПЕРВЫМ открытием любого проекта, которого программа ещё не видела (zip,

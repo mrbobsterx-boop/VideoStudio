@@ -1,0 +1,7 @@
+# Manim — только для «Подготовки» (графики и схемы в prerender/*.py). Ставится отдельно:
+#   .venv/bin/python -m pip install -r requirements-manim.txt        (Linux / macOS)
+#   .venv\Scripts\python.exe -m pip install -r requirements-manim.txt (Windows)
+# Linux:  sudo apt install libcairo2-dev libpango1.0-dev pkg-config  (до установки)
+# macOS:  brew install cairo pango pkg-config                         (до установки)
+# LaTeX не нужен: в сценах Manim используйте Text (не MathTex/Tex).
+manim>=0.18
