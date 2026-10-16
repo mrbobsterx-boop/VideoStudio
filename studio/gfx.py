@@ -20,7 +20,7 @@ import os
 import cv2
 import numpy as np
 
-from . import kit
+from .lru import _LRU
 
 try:
     import skia
@@ -79,7 +79,7 @@ if not HAS_SKIA:
 
 
 # ================================================================ кадр <-> Skia
-_BUFS = kit._LRU(max_items=6)       # буферы RGBA по размеру кадра — переиспользуются, не создаются каждый кадр
+_BUFS = _LRU(max_items=6)       # буферы RGBA по размеру кадра — переиспользуются, не создаются каждый кадр
 _OPEN = []                          # открытые холсты: [кадр, буфер, поверхность]
 
 
@@ -182,8 +182,8 @@ def _raw(c):
 
 
 # ================================================================ шрифты
-_TF = kit._LRU(max_items=48)        # гарнитуры (с нужной толщиной)
-_SKF = kit._LRU(max_items=256)      # skia.Font по размеру
+_TF = _LRU(max_items=48)        # гарнитуры (с нужной толщиной)
+_SKF = _LRU(max_items=256)      # skia.Font по размеру
 
 
 def _font_file(name):
@@ -561,7 +561,7 @@ def sk_text(c, s, x, y, f=None, color=(255, 255, 255), op=1.0, align='l', track=
 
 
 # ================================================================ код с подсветкой
-_TOK = kit._LRU(max_items=64)
+_TOK = _LRU(max_items=64)
 
 
 def _style(theme):
@@ -584,6 +584,16 @@ def _hex(h, d):
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
+def _sfor(st, tt):
+    """Стиль токена; у редких токенов (Name.Builtin.Type в GDScript) стиля в теме нет — берём родителя."""
+    while tt is not None:
+        try:
+            return st.style_for_token(tt)
+        except KeyError:
+            tt = tt.parent
+    return {}
+
+
 def _tokens(code, lang, theme):
     """Строки кода → [[(текст, цвет, жирный, курсив), …], …] (кэш)."""
     k = (code, lang, theme)
@@ -603,7 +613,7 @@ def _tokens(code, lang, theme):
     base = _hex(st.style_for_token(__import__('pygments.token', fromlist=['Text']).Text).get('color'), (220, 223, 228))
     lines, cur = [], []
     for ttype, val in lx.get_tokens(code.expandtabs(4)):
-        s = st.style_for_token(ttype)
+        s = _sfor(st, ttype)
         colr = _hex(s.get('color'), base)
         parts = val.split('\n')
         for i, part in enumerate(parts):
@@ -690,8 +700,8 @@ def code_block(fr, code, x, y, lang='python', size=28, theme='one-dark', font_na
 
 
 # ================================================================ постобработка кадра (без Skia: numpy/cv2)
-_VIGN = kit._LRU(max_items=6)
-_NOISE = kit._LRU(max_items=2)
+_VIGN = _LRU(max_items=6)
+_NOISE = _LRU(max_items=2)
 
 
 def bloom(fr, amount=0.6, threshold=170, radius=None):
@@ -771,3 +781,6 @@ def motion_blur(fr, dx, dy=0.0):
     if q > 1:
         out = cv2.resize(out, (w, h), interpolation=cv2.INTER_LINEAR)
     fr[...] = out
+
+
+from . import kit  # noqa: E402  (в конце: kit сам импортирует gfx, а функциям gfx kit нужен только при вызове)
