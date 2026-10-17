@@ -249,7 +249,20 @@ def _setup_kit(task):
         kit.ASSET_DIRS = list(task['asset_dirs'])
     if task.get('font_dirs'):
         kit.FONT_DIRS = list(task['font_dirs'])
+    kit.scene_start = float(task.get('scene_start') or 0.0)
+    kit.scene_index = int(task.get('scene_index') or 0)
+    kit.t_video = float(task.get('t') or 0.0)
     return kit
+
+
+def scene_time(task):
+    """Время и длина для кода сцены: при подгонке под голос (warp) — старые, по которым сцена написана."""
+    warp = task.get('warp')
+    if not warp:
+        return task['t'], task['dur']
+    from .voicefit import warp_eval
+    ds = float(task.get('dur_src') or task['dur'])
+    return max(0.0, min(ds, warp_eval(warp, task['t']))), ds
 
 
 def render_one(task):
@@ -260,7 +273,7 @@ def render_one(task):
     err = None
     try:
         fr = np.zeros((kit.H, kit.W, 3), np.uint8)
-        t, dur = task['t'], task['dur']
+        t, dur = scene_time(task)          # подгонка под голос: код сцены видит своё старое время
         lays = task.get('layers') or []
         layers.draw(fr, t, dur, lays, 'bottom')
         hits = []
@@ -433,7 +446,7 @@ def w_chunk(job):
     cmd = [job['ffmpeg'], '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
            '-s', '%dx%d' % (kit.W, kit.H), '-r', str(job['fps']), '-i', '-',
            '-c:v', 'libx264', '-preset', job.get('preset', 'medium'), '-crf', str(job.get('crf', 18)),
-           '-pix_fmt', 'yuv420p', out]
+           '-pix_fmt', 'yuv420p'] + (['-vf', 'scale=%d:-2:flags=area' % job['scale_w']] if job.get('scale_w') else []) + [out]
     log = open(out + '.log', 'w')
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=log)
     err = None
@@ -975,8 +988,12 @@ class Studio:
             scenes = []
             for s, f0, n in tl:
                 m = self.meta.get(s['id'], {})
+                hits = m.get('hits', [])
+                if s.get('warp'):
+                    from .voicefit import warp_inverse
+                    hits = [round(warp_inverse(s['warp'], float(h)), 3) for h in hits]
                 scenes.append(dict(id=s['id'], name=s['name'], file=s['file'], dur=s['dur'], f0=f0, n=n,
-                                   hits=m.get('hits', []), doc=m.get('doc', ''), gen=self.gen.get(s['id'], 0),
+                                   hits=hits, dur_src=s.get('dur_src'), warped=bool(s.get('warp')), doc=m.get('doc', ''), gen=self.gen.get(s['id'], 0),
                                    error=self.errors.get(s['id']), used=sorted(self.used.get(s['id'], [])),
                                    layers=self._layers_view(s), fx=copy.deepcopy(s.get('fx', [])),
                                    assets=sorted(self.assets_used.get(s['id'], [])), mood=s.get('mood')))
@@ -1012,7 +1029,21 @@ class Studio:
                     lfi=lfi, look=dict(self.p['look']), texts=dict(self.p['texts']),
                     layers=copy.deepcopy(s.get('layers', [])), fx=copy.deepcopy(s.get('fx', [])),
                     fonts=self.font_roles(), asset_dirs=project_dirs(self.dir, 'assets'),
-                    font_dirs=project_dirs(self.dir, 'fonts'), size=self.size)
+                    font_dirs=project_dirs(self.dir, 'fonts'), size=self.size, **self._timing(s))
+
+    def _timing(self, s):
+        """warp / dur_src сцены и её начало в ролике (kit.scene_start, kit.scene_index)."""
+        fps = self.p['fps']
+        f0, idx = 0, 0
+        for i, x in enumerate(self.p['scenes']):
+            if x is s or x['id'] == s['id']:
+                idx = i
+                break
+            f0 += max(1, int(round(float(x['dur']) * fps)))
+        out = dict(scene_start=f0 / fps, scene_index=idx)
+        if s.get('warp'):
+            out.update(warp=s['warp'], dur_src=float(s.get('dur_src') or s['dur']))
+        return out
 
     def _submit(self, s, lfi):
         sid = s['id']
@@ -1289,6 +1320,9 @@ class Studio:
             if dur is not None:
                 d = round(_num(dur, s['dur'], 0.2, 600.0), 3)
                 if d != s['dur']:
+                    if s.get('warp'):           # подогнанная под голос сцена: растянуть точки warp
+                        k = d / float(s['dur'])
+                        s['warp'] = [[round(a * k, 4), b] for a, b in s['warp']]
                     s['dur'] = d
                     bump = True        # сцены часто используют dur в расчётах
             if layers is not None:
@@ -1426,6 +1460,19 @@ class Studio:
                                  ('music_offset', 0.0, -3600, 3600), ('fade_out', 1.5, 0, 30)):
                 if k in audio:
                     A[k] = _num(audio[k], d, lo, hi)
+            for k, d, lo, hi in (('voice_volume', 1.0, 0, 3), ('duck_db', 12.0, 0, 30), ('voice_offset', 0.0, -60, 3600)):
+                if k in audio:
+                    A[k] = _num(audio[k], d, lo, hi)
+            for k in ('voice_on', 'duck'):
+                if k in audio:
+                    A[k] = bool(audio[k])
+            if 'voice_file' in audio:
+                fn = audio['voice_file']
+                if fn:
+                    fn = safe_rel(fn).replace(os.sep, '/')
+                    if not self.voice_path(fn):
+                        raise ValueError('Файл голоса не найден в папке проекта: %s' % fn)
+                A['voice_file'] = fn or None
             if 'music_file' in audio:
                 fn = audio['music_file']
                 if fn:
@@ -1519,6 +1566,54 @@ class Studio:
             src = m[-off:-off + n]
             out[:len(src)] = src
         return out
+
+    def voice_path(self, ref):
+        """Голос — файл внутри папки проекта (обычно voice/voice.wav из Glimpsy)."""
+        rel = safe_rel(ref)
+        if not rel:
+            return None
+        p = os.path.join(self.dir, rel)
+        return p if os.path.isfile(p) and p.lower().endswith(AUDIO_EXT) else None
+
+    def _voice_track(self, n):
+        """Дорожка голоса на весь ролик (стерео float32) или None."""
+        a = self.p['audio']
+        if not a.get('voice_file') or a.get('voice_on') is False:
+            return None
+        path = self.voice_path(a['voice_file'])
+        if not path:
+            return None
+        key = (path, os.path.getmtime(path))
+        if getattr(self, '_voice', None) is None or self._voice[0] != key:
+            cmd = [self.ffmpeg, '-v', 'error', '-i', path, '-f', 'f32le', '-ac', '2', '-ar', str(SR), '-']
+            raw = subprocess.run(cmd, capture_output=True).stdout
+            self._voice = (key, np.frombuffer(raw[:len(raw) // 8 * 8], np.float32).reshape(-1, 2).copy())
+        v = self._voice[1]
+        off = int(round(float(a.get('voice_offset', 0) or 0) * SR))
+        out = np.zeros((n, 2), np.float32)
+        if off >= 0:
+            src = v[:max(0, n - off)]
+            out[off:off + len(src)] = src
+        else:
+            src = v[-off:-off + n]
+            out[:len(src)] = src
+        return out
+
+    @staticmethod
+    def _duck_gain(voice, n, db):
+        """Приглушение музыки под голосом (sidechain): огибающая речи 10 мс, удержание 0.3 с, мягкие края."""
+        from scipy.ndimage import maximum_filter1d, uniform_filter1d
+        blk = SR // 100
+        nb = n // blk
+        if nb < 2:
+            return None
+        mono = np.abs(voice[:nb * blk, 0]).reshape(nb, blk)
+        rms = np.sqrt((mono ** 2).mean(axis=1))
+        act = (rms > 0.015).astype(np.float32)
+        act = maximum_filter1d(act, 30)
+        act = uniform_filter1d(act, 12)
+        g = (10 ** (-float(db) / 20) - 1) * act + 1
+        return np.interp(np.arange(n), np.arange(nb) * blk + blk / 2, g).astype(np.float32)
 
     def music_samples(self, path):
         key = (path, os.path.getmtime(path))
@@ -1679,9 +1774,14 @@ class Studio:
                     seg *= 0.89 / np.tanh(1.6)
                 seg *= gv
         extra = False
+        voice = self._voice_track(N)
         mus = self._music_track(N)
         if mus is not None:
             mv = float(acfg.get('music_volume', 0.8))
+            if voice is not None and acfg.get('duck', True):
+                g = self._duck_gain(voice, N, acfg.get('duck_db', 12.0))
+                if g is not None:
+                    mus *= g[:, None]
             L += mus[:, 0] * mv; R += mus[:, 1] * mv
             del mus
             extra = True
@@ -1699,7 +1799,11 @@ class Studio:
                     seg = X[c0:c0 + CH]
                     np.tanh(seg * 1.05, out=seg)
                     seg *= k
-        fo = float(acfg.get('fade_out', 1.5))
+        if voice is not None:              # голос — поверх всего и как есть (громкость выровнена в Glimpsy)
+            vv = float(acfg.get('voice_volume', 1.0))
+            L += voice[:, 0] * vv; R += voice[:, 1] * vv
+            del voice
+        fo = float(acfg.get('fade_out', 1.5)) if not acfg.get('voice_file') else min(0.3, float(acfg.get('fade_out', 1.5)))
         if fo > 0 and N > 0:
             k = min(N, int(fo * SR))
             ramp = np.linspace(1, 0, k, dtype=np.float32)
@@ -1912,12 +2016,16 @@ class Studio:
         return st['result']
 
     # ------------------------------------------------------------------ export
-    def export(self, crf=18):
+    def export(self, crf=18, mode='full', t0=None, t1=None):
+        """mode: 'full' — MP4 1920×1080 со звуком; 'glimpsy' — то же (интерфейс потом откроет папку);
+        'draft' — немой черновик 960×540 для просмотра во время записи. t0/t1 — только кусок ролика (секунды)."""
         crf = int(_num(crf, 18, 12, 35))
         with self.lock:
             if self.export_state.get('state') == 'running':
                 return False
-            st = dict(state='running', progress=0.0, msg='Подготовка…', cancel=False, started=time.time())
+            st = dict(state='running', progress=0.0, msg='Подготовка…', cancel=False, started=time.time(),
+                      mode=mode if mode in ('full', 'glimpsy', 'draft') else 'full',
+                      t0=None if t0 is None else max(0.0, float(t0)), t1=None if t1 is None else float(t1))
             self.export_state = st
         threading.Thread(target=self._export, args=(crf, st), daemon=True).start()
         return True
@@ -1956,8 +2064,9 @@ class Studio:
             t0 = time.time()
             while self.inflight and time.time() - t0 < 20:
                 time.sleep(0.1)
+            draft = st.get('mode') == 'draft'
             st['msg'] = 'Звук…'
-            mix = self.mix_audio()           # звук сцен считается в пуле — до кадров
+            mix = None if draft else self.mix_audio()           # звук сцен считается в пуле — до кадров
             tl, total = self.timeline()
             with self.lock:
                 fps = self.p['fps']
@@ -1967,13 +2076,20 @@ class Studio:
                                            name=s['name'], layers=copy.deepcopy(s.get('layers', [])),
                                            fx=copy.deepcopy(s.get('fx', [])),
                                            asset_dirs=project_dirs(self.dir, 'assets'),
-                                           font_dirs=project_dirs(self.dir, 'fonts'))
+                                           font_dirs=project_dirs(self.dir, 'fonts'), **self._timing(s))
                 look, texts, fonts = dict(self.p['look']), dict(self.p['texts']), self.font_roles()
                 title = self.p.get('title', 'video')
             frames = []
             for s, f0, n in tl:
                 for l in range(n):
                     frames.append(dict(sid=s['id'], t=l / fps, lfi=l))
+            g0 = int(round((st.get('t0') or 0) * fps))
+            g1 = total if st.get('t1') is None else max(g0 + 1, min(total, int(round(st['t1'] * fps))))
+            if g0 or g1 < total:
+                frames = frames[g0:g1]
+                total = len(frames)
+                if mix is not None:
+                    mix = mix[int(g0 / fps * SR):int(g1 / fps * SR)]
             if not frames:
                 raise RuntimeError('В проекте нет сцен')
             chunk = 45
@@ -1982,7 +2098,9 @@ class Studio:
                 part = frames[a:a + chunk]
                 need = {f['sid'] for f in part}
                 jobs.append(dict(out=os.path.join(tmpd, 'seg%05d.mp4' % ci), frames=part, fps=fps, ffmpeg=self.ffmpeg,
-                                 crf=crf, look=look, texts=texts, fonts=fonts, cancel_flag=st['flag'], size=self.size,
+                                 crf=28 if draft else crf, preset='veryfast' if draft else 'medium',
+                                 scale_w=960 if draft else None,
+                                 look=look, texts=texts, fonts=fonts, cancel_flag=st['flag'], size=self.size,
                                  scenes={k: v for k, v in scenes.items() if k in need}))
             st['msg'] = 'Рендер кадров…'
             futs = [self.submit(w_chunk, j, 'export') for j in jobs]
@@ -2010,21 +2128,27 @@ class Studio:
             if errs:
                 raise RuntimeError('В сценах есть ошибки, экспорт остановлен:\n' + errs[0])
             st['msg'] = 'Сборка файла…'
-            from scipy.io import wavfile
             wav = os.path.join(tmpd, 'audio.wav')
-            write_wav(wav, mix)
+            if not draft:
+                write_wav(wav, mix)
             lst = os.path.join(tmpd, 'list.txt')
             with open(lst, 'w') as f:
                 for j in jobs:
                     f.write("file '%s'\n" % os.path.basename(j['out']))
-            name = '%s_%s.mp4' % (slug(title), datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
+            part = '' if st.get('t0') is None and st.get('t1') is None else '_%ds-%ds' % (g0 / fps, g1 / fps)
+            name = '%s_%s%s%s.mp4' % (slug(title), datetime.datetime.now().strftime('%Y%m%d-%H%M%S'), part,
+                                      '_draft' if draft else '')
             out = os.path.join(self.dir, 'exports', name)
-            cmd = [self.ffmpeg, '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', lst, '-i', wav, '-c:v', 'copy',
-                   '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', out]
+            if draft:
+                cmd = [self.ffmpeg, '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', lst, '-c:v', 'copy', '-an',
+                       '-movflags', '+faststart', out]
+            else:
+                cmd = [self.ffmpeg, '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', lst, '-i', wav, '-c:v', 'copy',
+                       '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-shortest', '-movflags', '+faststart', out]
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0:
                 raise RuntimeError('ffmpeg: ' + r.stderr[-800:])
-            self.export_state = dict(state='done', progress=1.0, file=name, path=out, warn=st.get('warn'),
+            self.export_state = dict(state='done', progress=1.0, file=name, path=out, warn=st.get('warn'), mode=st.get('mode'),
                                      seconds=round(time.time() - st['started'], 1))
         except Exception as e:
             self.export_state = dict(state='error', msg=str(e), progress=st.get('progress', 0))

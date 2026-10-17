@@ -63,6 +63,10 @@ FONT_DIRS = []            # где искать шрифты (по умолча�
 FONT_ROLES = {}           # роль -> файл шрифта: {'title': 'oswald', 'serif': 'corm_i', 'text': 'oswald'}
 DEFAULT_ROLES = {'title': 'oswald', 'serif': 'corm_i', 'text': 'oswald'}
 LETTERBOX = True          # включены ли кинополосы (из Настроек) — от этого зависит «видимая область»
+# где сцена стоит в ролике (меняется при подгонке под голос). В сцене: from studio import kit; kit.scene_start
+scene_start = 0.0         # начало сцены в ролике, секунды (вместо констант вроде G0 = 66.43)
+scene_index = 0           # номер сцены в ролике, с 0
+t_video = 0.0             # время от начала сцены по ролику (при подгонке под голос t в render() — старое время)
 
 
 def safe_area():

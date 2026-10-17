@@ -604,7 +604,6 @@ async function soundAI(body) {
     };
   };
 }
-})();
 
 // ================================================================== «Подготовка» (3D, Manim, тяжёлые эффекты → cache/)
 let prepTimer = null;
@@ -659,3 +658,121 @@ async function checkPrerender() {
 }
 setInterval(checkPrerender, 15000);
 setTimeout(checkPrerender, 3000);
+
+// ================================================================== голос из Glimpsy: подогнать сцены под озвучку
+const vAudio = new Audio();
+let vStop = null;
+function playVoice(at, btn) {
+  clearTimeout(vStop);
+  if (btn && btn.classList.contains('on')) { vAudio.pause(); btn.classList.remove('on'); return; }
+  document.querySelectorAll('.vplay.on').forEach(b => b.classList.remove('on'));
+  if (!vAudio.src) vAudio.src = '/api/voicefile?v=' + Date.now();
+  const go = () => { vAudio.currentTime = Math.max(0, at - 0.5); vAudio.play().catch(() => {}); };
+  if (vAudio.readyState >= 1) go(); else vAudio.addEventListener('loadedmetadata', go, { once: true });
+  if (btn) btn.classList.add('on');
+  vStop = setTimeout(() => { vAudio.pause(); if (btn) btn.classList.remove('on'); }, 7000);
+}
+const fmtT = s => { s = Math.round(s * 10) / 10; return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`; };
+
+async function openVoice() {
+  const body = X.openModal('Голос из Glimpsy', '', { onClose: () => { vAudio.pause(); vAudio.removeAttribute('src'); } });
+  let plan = null;
+  const render = async () => {
+    const st = await api.get('/api/voice/status');
+    const pk = st.words && st.audio;
+    const fitted = st.fitted > 0;
+    body.innerHTML = `<div class="mcol">
+      <p class="mnote" style="margin:0">Запишите голос в <b>Glimpsy</b> в своём темпе — он положит в папку проекта <code>voice/</code>
+        чистый голос и время каждого слова. Здесь сцены подстроятся под голос: длина сцены = её кусок речи, а плашки, мемы и схемы
+        внутри сцены попадут на свои слова. Код сцен не меняется.</p>
+      <h4>1. Пакет озвучки</h4>
+      <div class="prep-list">
+        <div class="prep-row">${icon('mic')}<b>${st.audio ? esc(st.audio) : 'voice/voice.wav'}</b><span>${st.audio ? 'есть' : '<em class="bad">нет</em>'}</span></div>
+        <div class="prep-row">${icon('code')}<b>voice/words.json</b><span>${st.error ? '<em class="bad">' + esc(st.error) + '</em>' : st.words ? `${st.n} слов · ${fmtT(st.duration || 0)}${st.language ? ' · ' + esc(st.language) : ''}` : '<em class="bad">нет</em>'}</span></div>
+        <div class="prep-row">${icon('lib')}<b>scenes.md</b><span>${st.has_md ? 'текст сцен и якоря битов' : 'нет — текст из script.md по порядку, без якорей'}</span></div>
+      </div>
+      <div class="mrow"><label class="secondary small filebtn">${icon('upload')}Загрузить voice.wav и words.json<input type="file" id="vUp" accept=".wav,.flac,.json,audio/*,application/json" multiple hidden></label>
+        <span class="mnote">или Glimpsy сам кладёт их в папку <code>voice/</code> проекта</span></div>
+      <h4>2. Подогнать сцены</h4>
+      <div class="mrow">
+        <button class="solid-accent" id="vPlan" style="padding:9px 16px;border-radius:8px" ${pk ? '' : 'disabled'}>${icon('mic')}Подогнать под голос</button>
+        <span class="mnote">${fitted ? `Сейчас подогнано сцен: ${st.fitted} из ${st.scenes}. Повторная подгонка считает от исходных длин.` : 'Сначала только расчёт и отчёт — проект изменится после «Применить».'}</span>
+      </div>
+      <div id="vReport"></div>
+      <h4>3. Видео</h4>
+      <div class="mrow">
+        <button class="secondary small" id="vExp">${icon('export')}Экспорт для Glimpsy (MP4 с голосом)</button>
+        <button class="ghost small" id="vDraft" title="Быстро, без звука — смотреть во время записи голоса">Черновик без звука 960×540</button>
+      </div></div>`;
+    $('vUp').onchange = async e => {
+      const files = [...e.target.files]; e.target.value = '';
+      files.sort((a, b) => a.name.endsWith('.json') - b.name.endsWith('.json'));
+      for (const f of files) {
+        toast('Загружаю ' + esc(f.name) + '…', 0);
+        const r = await api.upload('/api/voice/upload?name=' + encodeURIComponent(f.name), f);
+        if (r.error) { toast('Ошибка: ' + esc(r.error)); return render(); }
+      }
+      toast('Пакет озвучки загружен ✓'); render();
+    };
+    $('vPlan').onclick = async () => {
+      $('vReport').innerHTML = '<p class="mnote">Сопоставляю текст сценария со словами голоса…</p>';
+      plan = await api.post('/api/voice/plan', {});
+      if (plan.error) { $('vReport').innerHTML = `<p class="mnote bad">${esc(plan.error)}</p>`; return; }
+      showReport();
+    };
+    $('vExp').onclick = async () => {
+      await X.flushDraft();
+      const r = await api.post('/api/export', { mode: 'glimpsy' });
+      toast(r.ok ? 'Экспорт с голосом начался — когда будет готов, откроется папка с файлом.' : esc(r.error || 'Экспорт не начался'));
+      X.refresh();
+    };
+    $('vDraft').onclick = async () => {
+      await X.flushDraft();
+      const r = await api.post('/api/export', { mode: 'draft' });
+      toast(r.ok ? 'Черновик 960×540 без звука считается…' : esc(r.error || 'Экспорт не начался'));
+      X.refresh();
+    };
+  };
+  const showReport = () => {
+    const p = plan;
+    const rows = p.scenes.map(r => {
+      const d = r.dur - r.dur_old;
+      const pct = r.matched == null ? '—' : Math.round(r.matched * 100) + ' %';
+      return `<tr class="${r.weak ? 'weak' : ''}"><td><b>${esc(r.id)}</b> ${esc(r.name)}</td>
+        <td class="n">${r.dur_old.toFixed(1)} → <b>${r.dur.toFixed(1)}</b> <span class="${d >= 0 ? 'up' : 'dn'}">${d >= 0 ? '+' : ''}${d.toFixed(1)}</span></td>
+        <td class="n">${r.anchors ? `${r.used} из ${r.anchors}` : '—'}</td>
+        <td class="n">${pct}</td>
+        <td>${r.first_word != null ? `<button class="icon vplay" data-at="${r.first_word - p.voice_offset}" title="Прослушать начало сцены">${icon('play')}</button>` : ''}</td></tr>`;
+    }).join('');
+    const weak = p.weak.length ? `<p class="mnote warn" style="margin:0">Слабое сопоставление (≤ 60 % слов совпало) — проверьте на слух: ${p.weak.map(w =>
+      `<a href="#" class="vweak" data-at="${w.at - p.voice_offset}">${esc(w.id)}</a>`).join(', ')}</p>` : '';
+    $('vReport').innerHTML = `<p class="mnote" style="margin:0">Совпало слов: <b>${Math.round(p.matched * 100)} %</b> из ${p.script_words} ·
+      голос ${fmtT(p.voice_end)}${p.voice_offset ? ` (сдвинут на ${p.voice_offset.toFixed(1)} с — заставка без слов)` : ''} ·
+      ролик станет <b>${fmtT(p.total)}</b> (хвост ${p.tail.toFixed(1)} с)</p>${weak}
+      <div class="vtable"><table><thead><tr><th>Сцена</th><th>Длина, с</th><th>Якоря</th><th>Слов</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="mrow"><button class="solid-accent" id="vApply" style="padding:9px 16px;border-radius:8px">Применить</button>
+        <span class="mnote">Перед применением сохранится версия проекта — подгонку можно отменить одной кнопкой.</span></div>`;
+    $('vApply').onclick = async () => {
+      await X.flushDraft();
+      const r = await api.post('/api/voice/apply', {});
+      if (!r.ok) return toast('Ошибка: ' + esc(r.error || ''));
+      X.dropFrames && X.dropFrames();
+      await X.refresh();
+      toast(`Сцены подогнаны под голос ✓ <div class="acts"><a href="#" id="vUndo">Отменить</a></div>`, 12000);
+      const u = $('vUndo'); if (u) u.onclick = async ev => {
+        ev.preventDefault();
+        await api.post('/api/voice/undo', { version: r.version });
+        X.dropFrames && X.dropFrames(); location.reload();
+      };
+      render();
+    };
+  };
+  body.addEventListener('click', e => {
+    const b = e.target.closest('.vplay'); if (b) { playVoice(+b.dataset.at, b); return; }
+    const w = e.target.closest('.vweak'); if (w) { e.preventDefault(); playVoice(+w.dataset.at); }
+  });
+  render();
+}
+X.openVoice = openVoice;
+$('voiceBtn').onclick = openVoice;
+})();

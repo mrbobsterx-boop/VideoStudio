@@ -825,6 +825,11 @@ function updateSettings() {
   setv('auMusOff', A.music_offset ?? 0);
   setv('auFade', A.fade_out ?? 1.5);
   $('musicName').textContent = A.music_file || 'нет';
+  $('voiceName').textContent = A.voice_file || 'нет';
+  $('auVoiceOn').checked = A.voice_on !== false;
+  setv('auVoiceVol', A.voice_volume ?? 1); $('auVoiceVolV').textContent = (+(A.voice_volume ?? 1)).toFixed(2);
+  $('auDuck').checked = A.duck !== false;
+  setv('auDuckDb', A.duck_db ?? 12);
   setv('fps', ST.fps);
   setv('fmt', ST.format || '16:9');
   $('projDir').textContent = ST.dir;
@@ -854,6 +859,12 @@ function updateSettings() {
       refresh();
     };
     $('musicRemove').onclick = () => aud('music_file', null);
+    $('auVoiceOn').onchange = e => aud('voice_on', e.target.checked);
+    $('auVoiceVol').onchange = e => aud('voice_volume', +e.target.value);
+    $('auVoiceVol').oninput = e => { $('auVoiceVolV').textContent = (+e.target.value).toFixed(2); };
+    $('auDuck').onchange = e => aud('duck', e.target.checked);
+    $('auDuckDb').onchange = e => aud('duck_db', Math.max(0, Math.min(30, +e.target.value || 12)));
+    $('voiceOpen').onclick = () => X.openVoice && X.openVoice();
     $('fmt').onchange = async e => {
       if (!confirm('Сменить формат кадра? Все сцены пересчитаются. Сцены, написанные кодом под другой формат, может понадобиться подправить (слои и эффекты подстроятся сами).')) { e.target.value = ST.format; return; }
       await api.post('/api/project', { format: e.target.value }); await refresh(); show(cur, true);
@@ -890,6 +901,7 @@ function updateExport() {
   if (lastExportSeen === null) { lastExportSeen = key; return; }
   if (key === lastExportSeen) return;
   lastExportSeen = key;
+  if (x.state === 'done' && x.mode === 'glimpsy') api.post('/api/open', { what: 'exports', file: x.file });
   if (x.state === 'done') {
     toast(`<b>Видео готово</b> за ${x.seconds} с: ${esc(x.file)}
       <div class="acts"><a href="/exports/${encodeURIComponent(x.file)}" target="_blank">Смотреть</a>

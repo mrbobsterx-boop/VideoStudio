@@ -312,6 +312,33 @@ class H(BaseHTTPRequestHandler):
                 return self.js(self.list_assets())
             if p == '/api/prerender':
                 return self.js(S.prerender_status())
+            if p == '/api/voice/status':
+                from . import voicefit
+                wj, audio = voicefit.find_package(S.dir)
+                info = dict(words=None, audio=None, duration=None, n=0)
+                if wj:
+                    try:
+                        meta, words = voicefit.load_words(wj)
+                        info.update(words='voice/words.json', n=len(words), duration=meta.get('duration') or words[-1][2],
+                                    language=meta.get('language'))
+                    except Exception as e:
+                        info['error'] = str(e)
+                if audio:
+                    info['audio'] = os.path.relpath(audio, S.dir).replace(os.sep, '/')
+                with S.lock:
+                    A = S.p['audio']
+                    info.update(voice_file=A.get('voice_file'), fit=A.get('voice_fit'), offset=A.get('voice_offset', 0),
+                                fitted=sum(1 for x in S.p['scenes'] if x.get('dur_src') is not None),
+                                scenes=len(S.p['scenes']), has_md=os.path.isfile(os.path.join(S.dir, 'scenes.md')))
+                return self.js(info)
+            if p == '/api/voicefile':
+                with S.lock:
+                    ref = S.p['audio'].get('voice_file')
+                path = S.voice_path(ref) if ref else None
+                if not path:
+                    from . import voicefit
+                    path = voicefit.find_package(S.dir)[1]
+                return self.file(path)
             if p == '/api/thumb':
                 return self.thumb(q.get('name', ''))
             if p == '/api/media':
@@ -434,8 +461,45 @@ class H(BaseHTTPRequestHandler):
                     raise ValueError('Файл не похож на шрифт TTF/OTF')
                 S.invalidate()
                 return self.js(dict(ok=True, name=os.path.splitext(name)[0]))
+            if p == '/api/voice/plan':
+                from . import voicefit
+                S.save(now=True)
+                plan = voicefit.plan(S.dir)
+                S._voice_plan = plan
+                wj, audio = voicefit.find_package(S.dir)
+                plan['audio'] = os.path.relpath(audio, S.dir).replace(os.sep, '/') if audio else None
+                return self.js(plan)
+            if p == '/api/voice/apply':
+                from . import voicefit
+                plan = getattr(S, '_voice_plan', None)
+                if not plan:
+                    return self.js(dict(ok=False, error='Сначала посчитайте подгонку'))
+                vid = voicefit.apply(S, plan, plan.get('audio'))
+                S._voice_plan = None
+                return self.js(dict(ok=True, version=vid))
+            if p == '/api/voice/undo':
+                from . import versions
+                versions.restore(S, self.jbody().get('version', ''))
+                return self.js(dict(ok=True))
+            if p == '/api/voice/upload':
+                raw = os.path.basename(unquote(q.get('name') or ''))
+                low = raw.lower()
+                if low.endswith('.json'):
+                    name = 'words.json'
+                elif low.endswith(AUD_EXT):
+                    name = 'voice' + os.path.splitext(low)[1]
+                else:
+                    raise ValueError('Нужны voice.wav и words.json из Glimpsy')
+                d = os.path.join(S.dir, 'voice')
+                os.makedirs(d, exist_ok=True)
+                self.save_upload(os.path.join(d, name), 2 << 30)
+                if name == 'words.json':
+                    from . import voicefit
+                    voicefit.load_words(os.path.join(d, name))          # проверить формат сразу
+                return self.js(dict(ok=True, name='voice/' + name))
             if p == '/api/export':
-                ok = S.export(self.jbody().get('crf', 18))
+                b = self.jbody()
+                ok = S.export(b.get('crf', 18), b.get('mode', 'full'), b.get('t0'), b.get('t1'))
                 return self.js(dict(ok=ok, error=None if ok else 'Экспорт уже идёт'))
             if p == '/api/prerender':
                 return self.js(dict(ok=S.prerender(bool(self.jbody().get('force')))))

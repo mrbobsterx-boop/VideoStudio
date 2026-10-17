@@ -21,6 +21,7 @@
   <symbol id="i-lib" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></symbol>
   <symbol id="i-ai" viewBox="0 0 24 24"><path d="M4 20l9.5-9.5"/><path d="M15 4v3M13.5 5.5h3M19 9v2M18 10h2M18 3.5l.6 1.4L20 5.5l-1.4.6L18 7.5l-.6-1.4L16 5.5l1.4-.6z"/><path d="M12 12l2-2"/></symbol>
   <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4v4.5H8"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5M8.5 20.5h7"/></symbol>
   <symbol id="i-cube" viewBox="0 0 24 24"><path d="M12 2.8 20 7.3v9.4L12 21.2 4 16.7V7.3z"/><path d="M4 7.3 12 12l8-4.7M12 12v9.2"/></symbol>
   <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="M7.5 10 12 14.5 16.5 10"/><path d="M4.5 16.5v2a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-2"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
@@ -60,6 +61,7 @@
     <button class="hbtn" id="libBtn" title="Готовые сцены и ваши сохранённые"><svg class="ic"><use href="#i-lib"/></svg>Библиотека</button>
     <button class="hbtn" id="sndBtn" title="Звук ко всем сценам: автоматически или через ИИ"><svg class="ic"><use href="#i-volume"/></svg>Звук</button>
     <button class="hbtn" id="aiBtn" title="Задание для ИИ и проверка его кода"><svg class="ic"><use href="#i-ai"/></svg>Сцена от ИИ</button>
+    <button class="hbtn" id="voiceBtn" title="Голос из Glimpsy: подогнать сцены под озвучку и выгрузить ролик с голосом"><svg class="ic"><use href="#i-mic"/></svg>Голос</button>
     <button class="hbtn" id="prepBtn" title="«Подготовка»: заранее посчитать 3D-модели, графики Manim и тяжёлые эффекты (cache/)"><svg class="ic"><use href="#i-cube"/></svg>Подготовка<i class="dot" id="prepDot" hidden></i></button>
     <button class="hbtn" id="verBtn" title="Сохранённые версии проекта"><svg class="ic"><use href="#i-history"/></svg>Версии</button>
     <div class="export-box">
@@ -203,6 +205,13 @@
         <label class="row">Громкость музыки <input type="range" id="auMusVol" min="0" max="1.5" step="0.05"><span id="auMusVolV" class="val"></span></label>
         <label class="row">Сдвиг музыки, с <input type="number" id="auMusOff" step="0.1" class="num"></label>
         <label class="row">Затухание в конце, с <input type="number" id="auFade" step="0.1" min="0" class="num"></label>
+        <div class="row">Голос (Glimpsy):
+          <span id="voiceName" class="pill">нет</span>
+          <button class="ghost small" id="voiceOpen">Подогнать сцены…</button>
+        </div>
+        <label class="row chk"><input type="checkbox" id="auVoiceOn"> Голос звучит в превью и в экспорте</label>
+        <label class="row">Громкость голоса <input type="range" id="auVoiceVol" min="0" max="2" step="0.05"><span id="auVoiceVolV" class="val"></span></label>
+        <label class="row chk"><input type="checkbox" id="auDuck"> Приглушать музыку под голосом на <input type="number" id="auDuckDb" min="0" max="30" step="1" class="num"> дБ</label>
       </div>
       <div class="set-group">
         <h3>Папки</h3>
